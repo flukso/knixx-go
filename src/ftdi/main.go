@@ -1,15 +1,12 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"knixx/config"
 	"os"
-	"time"
 
-	"knixx/ncn"
-	"knixx/tp1"
-
-	"github.com/vapourismo/knx-go/knx/cemi"
-	"github.com/vapourismo/knx-go/knx/dpt"
+	"github.com/abiosoft/ishell"
 	"github.com/ziutek/ftdi"
 )
 
@@ -27,9 +24,13 @@ const (
 	latency = 16 // ms
 )
 
+var configPath = flag.String("config", "knixx.ini", "Path to the ini file")
+
 func main() {
-	var input = make([]byte, 128)
-	var n int
+	flag.Parse()
+
+	dev, err := config.Load(*configPath)
+	checkErr(err)
 
 	d, err := ftdi.OpenFirst(vendor, product, ftdi.ChannelAny)
 	checkErr(err)
@@ -41,31 +42,57 @@ func main() {
 	d.SetLineProperties(ftdi.DataBits8, ftdi.StopBits1, ftdi.ParityNone)
 	d.PurgeWriteBuffer() // rx
 
-	var tg = tp1.Telegram{
-		Ctrl: tp1.Ctrl{
-			Repeat:   false,
-			Priority: tp1.PriorityLow},
-		Src:  uint16(cemi.NewIndividualAddr3(7, 8, 1)),
-		Dest: uint16(cemi.NewGroupAddr3(0, 0, 2)),
-		Npci: tp1.Npci{
-			AddrType: tp1.AddrGroup,
-			Routing:  0},
-		Tpci: tp1.Tpci{
-			Transport: tp1.UnnumberedDataPacket,
-			Sequence:  0},
-		Apci: tp1.GroupValueWrite,
-		Data: dpt.DPT_1001(false).Pack()}
+	cmds := make(chan command, txQueueLen)
+	done := make(chan struct{})
+	go transmit(d, dev, cmds, done)
 
-	if buf, err := tg.Pack(); err == nil {
-		fmt.Printf("> % x\n", buf)
-		ncn.TxData(d, buf)
-	}
+	shell := ishell.New()
+	shell.AddCmd(&ishell.Cmd{
+		Name: "switch",
+		Help: switchUsage,
+		Func: func(c *ishell.Context) {
+			name, on, err := parseSwitch(c.Args)
+			if err != nil {
+				c.Println(err)
+				return
+			}
+			sw := dev.Switch(name)
+			if sw == nil {
+				c.Println("unknown switch:", name)
+				return
+			}
+			select {
+			case cmds <- command{sw, on}:
+			default:
+				c.Println("tx queue full")
+			}
+		},
+	})
+	shell.AddCmd(&ishell.Cmd{
+		Name: "sniff",
+		Help: sniffUsage,
+		Func: func(c *ishell.Context) {
+			switch len(c.Args) {
+			case 0:
+				if sniff.Load() {
+					c.Println("sniff is on")
+				} else {
+					c.Println("sniff is off")
+				}
+			case 1:
+				on, ok := parseOnOff(c.Args[0])
+				if !ok {
+					c.Println(sniffUsage)
+					return
+				}
+				sniff.Store(on)
+			default:
+				c.Println(sniffUsage)
+			}
+		},
+	})
+	shell.Run()
 
-	for {
-		for n = 0; n == 0; {
-			time.Sleep(10 * time.Millisecond)
-			n, _ = d.Read(input)
-		}
-		fmt.Printf("< % x\n", input[:n])
-	}
+	close(cmds)
+	<-done
 }

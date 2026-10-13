@@ -22,7 +22,9 @@ func TxData(w io.Writer, buf []byte) (int, error) {
 		} else {
 			offset = U_L_DataStartReq
 		}
-		w.Write([]byte{uint8(offset + i), b})
+		if _, err := w.Write([]byte{uint8(offset + i), b}); err != nil {
+			return i, err
+		}
 	}
 	return len(buf), nil
 }
