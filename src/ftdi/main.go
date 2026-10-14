@@ -61,11 +61,18 @@ func main() {
 				c.Println("unknown switch:", name)
 				return
 			}
-			select {
-			case cmds <- command{sw, on}:
-			default:
-				c.Println("tx queue full")
+			enqueue(c, cmds, command{kind: cmdSwitch, sw: sw, on: on})
+		},
+	})
+	shell.AddCmd(&ishell.Cmd{
+		Name: "stat",
+		Help: "report the transceiver state and system status",
+		Func: func(c *ishell.Context) {
+			if len(c.Args) != 0 {
+				c.Println("usage: stat")
+				return
 			}
+			enqueue(c, cmds, command{kind: cmdStat})
 		},
 	})
 	shell.AddCmd(&ishell.Cmd{
@@ -95,4 +102,13 @@ func main() {
 
 	close(cmds)
 	<-done
+}
+
+// enqueue hands cmd to the transmit goroutine without blocking the shell.
+func enqueue(c *ishell.Context, cmds chan<- command, cmd command) {
+	select {
+	case cmds <- cmd:
+	default:
+		c.Println("tx queue full")
+	}
 }
