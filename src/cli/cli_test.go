@@ -2,7 +2,9 @@ package cli
 
 import (
 	"bytes"
+	"errors"
 	"knixx/bus"
+	"knixx/config"
 	"knixx/light"
 	"strings"
 	"testing"
@@ -58,7 +60,8 @@ func TestExec(t *testing.T) {
 		},
 	}
 	queue := make(chan bus.Command, 2)
-	cmds := Commands(dev, queue)
+	var store fakeStore
+	cmds := Commands(dev, &store, queue)
 	defer bus.Sniff.Store(false)
 
 	tests := []struct {
@@ -71,7 +74,7 @@ func TestExec(t *testing.T) {
 		{"exit", true, "", nil},
 		{"help", false, "switch", nil},
 		{"bogus", false, `unknown command "bogus"`, nil},
-		{"switch b ON", false, "", &bus.Command{Kind: bus.CmdSwitch, Sw: &dev.Switches[1], On: true}},
+		{"switch b ON", false, "", &bus.Command{Kind: bus.CmdSwitch, Switch: 1, On: true}},
 		{"switch C on", false, "unknown switch: C", nil},
 		{"switch A", false, switchUsage, nil},
 		{"stat", false, "", &bus.Command{Kind: bus.CmdStat}},
@@ -106,5 +109,80 @@ func TestExec(t *testing.T) {
 	Exec(cmds, "stat", &w)
 	if !strings.Contains(w.String(), "tx queue full") {
 		t.Errorf("full queue: output %q", w.String())
+	}
+}
+
+type fakeStore struct {
+	saved []byte
+	err   error
+}
+
+func (s *fakeStore) Save(data []byte) error {
+	if s.err != nil {
+		return s.err
+	}
+	s.saved = data
+	return nil
+}
+
+func TestConfig(t *testing.T) {
+	dev, err := config.Parse(config.Default)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queue := make(chan bus.Command, 1)
+	var store fakeStore
+	cmds := Commands(dev, &store, queue)
+
+	exec := func(line string) string {
+		var w bytes.Buffer
+		Exec(cmds, line, &w)
+		return w.String()
+	}
+
+	if got := exec("config"); !strings.Contains(got, "device.individual = 7.8.1") ||
+		!strings.Contains(got, "A.group = ") || !strings.Contains(got, "B.group = ") {
+		t.Errorf("config: %q", got)
+	}
+	if got := exec("config get device.individual"); got != "7.8.1\n" {
+		t.Errorf("config get: %q", got)
+	}
+
+	for _, line := range []string{
+		"config get C.group",
+		"config set A.group nope",
+		"config set A.group",
+		"config bogus",
+	} {
+		before := *dev
+		got := exec(line)
+		if got == "" || *dev != before || store.saved != nil || len(queue) != 0 {
+			t.Errorf("%q: output %q, dev %+v, saved %q, queued %d", line, got, dev, store.saved, len(queue))
+		}
+	}
+
+	if got := exec("config set b.group 1/2/3"); got != "b.group = 1/2/3 (saved)\n" {
+		t.Errorf("config set: %q", got)
+	}
+	if v, _ := config.Get(dev, "B.group"); v != "1/2/3" {
+		t.Errorf("B.group = %s", v)
+	}
+	if string(store.saved) != string(config.Format(dev)) {
+		t.Errorf("saved %q", store.saved)
+	}
+	if got := <-queue; got.Kind != bus.CmdConfig || got.Dev != *dev {
+		t.Errorf("queued %+v", got)
+	}
+
+	store.err = errors.New("flash unavailable")
+	if got := exec("config set A.group 0/0/9"); !strings.Contains(got, "not saved: flash unavailable") {
+		t.Errorf("failed save: %q", got)
+	}
+	<-queue
+
+	queue <- bus.Command{Kind: bus.CmdStat}
+	before := *dev
+	if got := exec("config set A.group 0/0/7"); got != "tx queue full\n" || *dev != before {
+		t.Errorf("full queue: output %q, dev %+v", got, dev)
 	}
 }

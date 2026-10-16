@@ -24,5 +24,5 @@ func main() {
 	done := make(chan struct{})
 	go bus.Run(machine.UART0, dev, cmds, done)
 
-	runConsole(cli.Commands(dev, cmds), log.Bytes())
+	runConsole(cli.Commands(dev, flashStore{}, cmds), log.Bytes())
 }

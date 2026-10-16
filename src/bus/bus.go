@@ -35,12 +35,16 @@ type Kind uint8
 const (
 	CmdSwitch Kind = iota
 	CmdStat
+	CmdConfig
 )
 
 type Command struct {
 	Kind Kind
-	Sw   *light.Switch
-	On   bool
+	// Switch indexes Device.Switches for CmdSwitch.
+	Switch uint8
+	On     bool
+	// Dev replaces the device configuration for CmdConfig.
+	Dev light.Device
 }
 
 type receiver struct {
@@ -71,10 +75,12 @@ func (r *receiver) handle(data []byte) {
 
 // Run sends a telegram for every command received on cmds and reports
 // whatever the transceiver returns in between. It is the only user of d while
-// it runs. It returns once cmds is closed and drained, closing done.
+// it runs, and works on its own copy of dev, which CmdConfig replaces. It
+// returns once cmds is closed and drained, closing done.
 func Run(d io.ReadWriter, dev *light.Device, cmds <-chan Command, done chan<- struct{}) {
 	var input [128]byte
 	var rx receiver
+	cur := *dev
 
 	defer close(done)
 	ticker := time.NewTicker(rxPoll)
@@ -88,7 +94,11 @@ func Run(d io.ReadWriter, dev *light.Device, cmds <-chan Command, done chan<- st
 			}
 			switch cmd.Kind {
 			case CmdSwitch:
-				tg := dev.Telegram(cmd.Sw, cmd.On)
+				if int(cmd.Switch) >= len(cur.Switches) {
+					fmt.Fprintln(Out, "bus: no switch", cmd.Switch)
+					continue
+				}
+				tg := cur.Telegram(&cur.Switches[cmd.Switch], cmd.On)
 				buf, err := tg.Pack()
 				if err != nil {
 					fmt.Fprintln(Out, err)
@@ -100,6 +110,8 @@ func Run(d io.ReadWriter, dev *light.Device, cmds <-chan Command, done chan<- st
 				}
 			case CmdStat:
 				stat(d, &rx, input[:])
+			case CmdConfig:
+				cur = cmd.Dev
 			}
 		case <-ticker.C:
 			if n, _ := d.Read(input[:]); n > 0 {

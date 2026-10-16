@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"knixx/bus"
+	"knixx/config"
 	"knixx/light"
 	"strings"
 )
@@ -15,6 +16,7 @@ const (
 	switchUsage = "usage: switch <A|B> <on|off>"
 	sniffUsage  = "usage: sniff <on|off>"
 	statUsage   = "usage: stat"
+	configUsage = "usage: config [get <key> | set <key> <value>]"
 )
 
 var errUsage = errors.New(switchUsage)
@@ -27,8 +29,9 @@ type Cmd struct {
 }
 
 // Commands returns the console commands. Commands that talk to the
-// transceiver are queued on cmds.
-func Commands(dev *light.Device, cmds chan<- bus.Command) []Cmd {
+// transceiver are queued on cmds; configuration changes are applied to dev
+// and saved to store.
+func Commands(dev *light.Device, store config.Store, cmds chan<- bus.Command) []Cmd {
 	return []Cmd{
 		{
 			Name: "switch",
@@ -39,12 +42,12 @@ func Commands(dev *light.Device, cmds chan<- bus.Command) []Cmd {
 					fmt.Fprintln(w, err)
 					return
 				}
-				sw := dev.Switch(name)
-				if sw == nil {
+				i, ok := dev.SwitchIndex(name)
+				if !ok {
 					fmt.Fprintln(w, "unknown switch:", name)
 					return
 				}
-				enqueue(w, cmds, bus.Command{Kind: bus.CmdSwitch, Sw: sw, On: on})
+				enqueue(w, cmds, bus.Command{Kind: bus.CmdSwitch, Switch: i, On: on})
 			},
 		},
 		{
@@ -81,6 +84,52 @@ func Commands(dev *light.Device, cmds chan<- bus.Command) []Cmd {
 				enqueue(w, cmds, bus.Command{Kind: bus.CmdStat})
 			},
 		},
+		{
+			Name: "config",
+			Help: configUsage,
+			Func: func(args []string, w io.Writer) {
+				configCmd(dev, store, cmds, args, w)
+			},
+		},
+	}
+}
+
+func configCmd(dev *light.Device, store config.Store, cmds chan<- bus.Command, args []string, w io.Writer) {
+	switch {
+	case len(args) == 0:
+		for _, key := range config.Keys {
+			v, _ := config.Get(dev, key)
+			fmt.Fprintf(w, "%s = %s\n", key, v)
+		}
+	case len(args) == 2 && args[0] == "get":
+		v, err := config.Get(dev, args[1])
+		if err != nil {
+			fmt.Fprintln(w, err)
+			return
+		}
+		fmt.Fprintln(w, v)
+	case len(args) == 3 && args[0] == "set":
+		key := args[1]
+		prev := *dev
+		if err := config.Set(dev, key, args[2]); err != nil {
+			fmt.Fprintln(w, err)
+			return
+		}
+		select {
+		case cmds <- bus.Command{Kind: bus.CmdConfig, Dev: *dev}:
+		default:
+			*dev = prev
+			fmt.Fprintln(w, "tx queue full")
+			return
+		}
+		v, _ := config.Get(dev, key)
+		if err := store.Save(config.Format(dev)); err != nil {
+			fmt.Fprintf(w, "%s = %s (not saved: %v)\n", key, v, err)
+			return
+		}
+		fmt.Fprintf(w, "%s = %s (saved)\n", key, v)
+	default:
+		fmt.Fprintln(w, configUsage)
 	}
 }
 

@@ -49,7 +49,7 @@ func main() {
 	go bus.Run(d, dev, cmds, done)
 
 	shell := ishell.New()
-	for _, cmd := range cli.Commands(dev, cmds) {
+	for _, cmd := range cli.Commands(dev, config.FileStore{Path: *configPath}, cmds) {
 		shell.AddCmd(&ishell.Cmd{
 			Name: cmd.Name,
 			Help: cmd.Help,

@@ -57,14 +57,14 @@ func testDevice() *light.Device {
 func TestTransmit(t *testing.T) {
 	dev := testDevice()
 	queued := []Command{
-		{Kind: CmdSwitch, Sw: dev.Switch("A"), On: true},
-		{Kind: CmdSwitch, Sw: dev.Switch("B"), On: true},
-		{Kind: CmdSwitch, Sw: dev.Switch("A"), On: false},
+		{Kind: CmdSwitch, Switch: 0, On: true},
+		{Kind: CmdSwitch, Switch: 1, On: true},
+		{Kind: CmdSwitch, Switch: 0, On: false},
 	}
 
 	var want bytes.Buffer
 	for _, cmd := range queued {
-		tg := dev.Telegram(cmd.Sw, cmd.On)
+		tg := dev.Telegram(&dev.Switches[cmd.Switch], cmd.On)
 		buf, err := tg.Pack()
 		if err != nil {
 			t.Fatal(err)
@@ -109,5 +109,35 @@ func TestStatNoReply(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("output %q lacks %q", got, want)
 		}
+	}
+}
+
+func TestConfig(t *testing.T) {
+	Sniff.Store(false)
+	dev := testDevice()
+	moved := *dev
+	moved.Switches[0].Group = 0x0909
+
+	var want bytes.Buffer
+	for _, d := range []*light.Device{dev, &moved} {
+		tg := d.Telegram(&d.Switches[0], true)
+		buf, err := tg.Pack()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ncn.TxData(&want, buf)
+	}
+
+	var d fakeDevice
+	run(t, &d, dev, []Command{
+		{Kind: CmdSwitch, Switch: 0, On: true},
+		{Kind: CmdConfig, Dev: moved},
+		{Kind: CmdSwitch, Switch: 0, On: true},
+	})
+	if !bytes.Equal(d.Bytes(), want.Bytes()) {
+		t.Errorf("got % x, want % x", d.Bytes(), want.Bytes())
+	}
+	if dev.Switches[0].Group != 0x0002 {
+		t.Errorf("Run modified the caller's device: %+v", dev)
 	}
 }

@@ -28,6 +28,9 @@ var (
 	filesystem = littlefs.New(blockDevice)
 
 	configBuf [1024]byte
+
+	// mounted records that the littlefs is usable for saving.
+	mounted bool
 )
 
 // loadConfig mounts the littlefs on the external flash, formatting it and
@@ -82,9 +85,10 @@ func readConfig(log io.Writer) ([]byte, error) {
 	} else {
 		fmt.Fprintln(log, "mounted littlefs")
 	}
+	mounted = true
 
 	if _, err := filesystem.Stat(configPath); err != nil {
-		if err := writeDefault(); err != nil {
+		if err := writeConfig(config.Default); err != nil {
 			return nil, err
 		}
 		fmt.Fprintln(log, "wrote default", configPath)
@@ -114,14 +118,24 @@ func readConfig(log io.Writer) ([]byte, error) {
 	return configBuf[:n], nil
 }
 
-func writeDefault() error {
+func writeConfig(data []byte) error {
 	f, err := filesystem.OpenFile(configPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC)
 	if err != nil {
 		return fmt.Errorf("%s: %w", configPath, err)
 	}
-	if _, err := f.Write(config.Default); err != nil {
+	if _, err := f.Write(data); err != nil {
 		f.Close()
 		return fmt.Errorf("%s: %w", configPath, err)
 	}
 	return f.Close()
+}
+
+// flashStore saves the configuration to knixx.ini on the littlefs.
+type flashStore struct{}
+
+func (flashStore) Save(data []byte) error {
+	if !mounted {
+		return errors.New("flash unavailable")
+	}
+	return writeConfig(data)
 }

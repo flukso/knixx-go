@@ -16,3 +16,15 @@ func Load(path string) (*light.Device, error) {
 	}
 	return Parse(data)
 }
+
+// FileStore saves the configuration to the file at Path.
+type FileStore struct {
+	Path string
+}
+
+func (s FileStore) Save(data []byte) error {
+	if err := os.WriteFile(s.Path, data, 0o644); err != nil {
+		return fmt.Errorf("config: %w", err)
+	}
+	return nil
+}

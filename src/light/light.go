@@ -22,12 +22,21 @@ type Device struct {
 // Switch looks up a switch by its case-insensitive name. It returns nil when
 // no switch matches.
 func (d *Device) Switch(name string) *Switch {
-	for i := range d.Switches {
-		if strings.EqualFold(d.Switches[i].Name, name) {
-			return &d.Switches[i]
-		}
+	if i, ok := d.SwitchIndex(name); ok {
+		return &d.Switches[i]
 	}
 	return nil
+}
+
+// SwitchIndex returns the index of the switch with the case-insensitive
+// name.
+func (d *Device) SwitchIndex(name string) (uint8, bool) {
+	for i := range d.Switches {
+		if strings.EqualFold(d.Switches[i].Name, name) {
+			return uint8(i), true
+		}
+	}
+	return 0, false
 }
 
 // Telegram builds the group value write that sets sw to the requested state.

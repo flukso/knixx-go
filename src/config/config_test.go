@@ -75,3 +75,73 @@ func TestDefault(t *testing.T) {
 		t.Errorf("default config lacks switch A or B: %+v", dev)
 	}
 }
+
+func TestFormatMatchesDefault(t *testing.T) {
+	dev, err := Parse(Default)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := Format(dev); string(got) != string(Default) {
+		t.Errorf("Format = %q, want %q", got, Default)
+	}
+}
+
+func TestGetSet(t *testing.T) {
+	dev, err := Parse(Default)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range Keys {
+		if _, err := Get(dev, key); err != nil {
+			t.Errorf("Get(%s): %v", key, err)
+		}
+	}
+
+	if err := Set(dev, "b.GROUP", "1/2/3"); err != nil {
+		t.Fatal(err)
+	}
+	if err := Set(dev, "Device.Individual", "1.1.12"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := Get(dev, "B.group"); v != "1/2/3" {
+		t.Errorf("B.group = %s", v)
+	}
+	if v, _ := Get(dev, "device.individual"); v != "1.1.12" {
+		t.Errorf("device.individual = %s", v)
+	}
+
+	before := *dev
+	for _, tt := range [][2]string{
+		{"C.group", "0/0/1"},
+		{"A.individual", "1.1.1"},
+		{"device", "1.1.1"},
+		{"A.group", "1.1.1"},
+		{"device.individual", "0/0/1"},
+		{"A.group", "nope"},
+	} {
+		if err := Set(dev, tt[0], tt[1]); err == nil {
+			t.Errorf("Set(%s, %s): expected an error", tt[0], tt[1])
+		}
+	}
+	if *dev != before {
+		t.Errorf("failed Set modified the device: %+v", dev)
+	}
+
+	again, err := Parse(Format(dev))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *again != *dev {
+		t.Errorf("round trip: got %+v, want %+v", again, dev)
+	}
+}
+
+func TestFileStore(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "knixx.ini")
+	if err := (FileStore{Path: path}).Save(Default); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err != nil {
+		t.Fatal(err)
+	}
+}
