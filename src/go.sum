@@ -44,3 +44,7 @@ golang.org/x/text v0.19.0 h1:kTxAhCbGbxhK0IwgSKiMO5awPoDQ0RpfiVYBfK860YM=
 golang.org/x/text v0.19.0/go.mod h1:BuEKDfySbSR4drPmRPG/7iBdf8hvFMuRexcpahXilzY=
 gopkg.in/yaml.v3 v3.0.1 h1:fxVm/GzAzEWqLHuvctI91KS9hhNmmWOoWu0XTYJS7CA=
 gopkg.in/yaml.v3 v3.0.1/go.mod h1:K4uyk7z7BCEPqu6E+C64Yfv1cQ7kz7rIZviUmN+EgEM=
+tinygo.org/x/drivers v0.36.0 h1:F0x342A6GWqh6abtCa57uAxCyz/b9MbGzvIVvIf+gpE=
+tinygo.org/x/drivers v0.36.0/go.mod h1:DQgKyHkB4G6IEOKVTAjApbKnWGwESN91EVJO+nMOE9Y=
+tinygo.org/x/tinyfs v0.5.0 h1:1nLSvtvvoNcK3Ii+Dib9MVe4y/Fnp2iMgzbKgADGfbs=
+tinygo.org/x/tinyfs v0.5.0/go.mod h1:45hZCJ5e4rJxc3BaJTy1qhe5N+LbF/CpuFS4jPhhYuo=

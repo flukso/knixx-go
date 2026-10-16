@@ -65,3 +65,13 @@ func TestLoadErrors(t *testing.T) {
 		t.Error("absent file: expected an error")
 	}
 }
+
+func TestDefault(t *testing.T) {
+	dev, err := Parse(Default)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dev.Switch("A") == nil || dev.Switch("B") == nil {
+		t.Errorf("default config lacks switch A or B: %+v", dev)
+	}
+}

@@ -1,4 +1,4 @@
-package main
+package bus
 
 import (
 	"bytes"
@@ -21,20 +21,20 @@ func (f *fakeDevice) Read(p []byte) (int, error) {
 	return n, nil
 }
 
-func run(t *testing.T, d *fakeDevice, dev *light.Device, queued []command) string {
+func run(t *testing.T, d *fakeDevice, dev *light.Device, queued []Command) string {
 	t.Helper()
 	var captured bytes.Buffer
-	prev := out
-	out = &captured
-	defer func() { out = prev }()
+	prev := Out
+	Out = &captured
+	defer func() { Out = prev }()
 
-	cmds := make(chan command, txQueueLen)
+	cmds := make(chan Command, QueueLen)
 	done := make(chan struct{})
 	for _, cmd := range queued {
 		cmds <- cmd
 	}
 	close(cmds)
-	go transmit(d, dev, cmds, done)
+	go Run(d, dev, cmds, done)
 
 	select {
 	case <-done:
@@ -56,15 +56,15 @@ func testDevice() *light.Device {
 
 func TestTransmit(t *testing.T) {
 	dev := testDevice()
-	queued := []command{
-		{kind: cmdSwitch, sw: dev.Switch("A"), on: true},
-		{kind: cmdSwitch, sw: dev.Switch("B"), on: true},
-		{kind: cmdSwitch, sw: dev.Switch("A"), on: false},
+	queued := []Command{
+		{Kind: CmdSwitch, Sw: dev.Switch("A"), On: true},
+		{Kind: CmdSwitch, Sw: dev.Switch("B"), On: true},
+		{Kind: CmdSwitch, Sw: dev.Switch("A"), On: false},
 	}
 
 	var want bytes.Buffer
 	for _, cmd := range queued {
-		tg := dev.Telegram(cmd.sw, cmd.on)
+		tg := dev.Telegram(cmd.Sw, cmd.On)
 		buf, err := tg.Pack()
 		if err != nil {
 			t.Fatal(err)
@@ -72,9 +72,9 @@ func TestTransmit(t *testing.T) {
 		ncn.TxData(&want, buf)
 	}
 
-	defer sniff.Store(false)
+	defer Sniff.Store(false)
 	for _, on := range []bool{true, false} {
-		sniff.Store(on)
+		Sniff.Store(on)
 		var d fakeDevice
 		run(t, &d, dev, queued)
 		if !bytes.Equal(d.Bytes(), want.Bytes()) {
@@ -84,9 +84,9 @@ func TestTransmit(t *testing.T) {
 }
 
 func TestStat(t *testing.T) {
-	sniff.Store(false)
+	Sniff.Store(false)
 	d := fakeDevice{rx: []byte{0x07, 0x4b, 0xfb}}
-	got := run(t, &d, testDevice(), []command{{kind: cmdStat}})
+	got := run(t, &d, testDevice(), []Command{{Kind: CmdStat}})
 
 	if want := []byte{ncn.U_StateReq, ncn.U_SystemStatReq}; !bytes.Equal(d.Bytes(), want) {
 		t.Errorf("request % x, want % x", d.Bytes(), want)
@@ -102,9 +102,9 @@ func TestStat(t *testing.T) {
 }
 
 func TestStatNoReply(t *testing.T) {
-	sniff.Store(false)
+	Sniff.Store(false)
 	var d fakeDevice
-	got := run(t, &d, testDevice(), []command{{kind: cmdStat}})
+	got := run(t, &d, testDevice(), []Command{{Kind: CmdStat}})
 	for _, want := range []string{"no U_State.ind reply", "no U_SystemStat.ind reply"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output %q lacks %q", got, want)

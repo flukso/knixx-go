@@ -1,6 +1,7 @@
 package config
 
 import (
+	_ "embed"
 	"fmt"
 	"knixx/light"
 
@@ -16,12 +17,19 @@ const (
 
 var switchNames = [light.NumSwitches]string{"A", "B"}
 
-// Load reads the device's individual address and the group address of each
-// switch from the ini file at path.
-func Load(path string) (*light.Device, error) {
+// Default is the configuration written to a freshly formatted device.
+//
+//go:embed default.ini
+var Default []byte
+
+// Parse reads the device's individual address and the group address of each
+// switch from ini file contents.
+func Parse(data []byte) (*light.Device, error) {
 	ini := goini.New()
-	if err := ini.ParseFile(path); err != nil {
-		return nil, fmt.Errorf("config: %s: %w", path, err)
+	ini.SetParseSection(true)
+	ini.SetSkipCommits(true)
+	if err := ini.Parse(data, goini.DefaultLineSeparator, goini.DefaultKeyValueSeparator); err != nil {
+		return nil, fmt.Errorf("config: %w", err)
 	}
 
 	var dev light.Device

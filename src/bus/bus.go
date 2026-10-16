@@ -1,4 +1,6 @@
-package main
+// Package bus drives the NCN5121 transceiver: it transmits queued commands
+// and reports what the transceiver sends back.
+package bus
 
 import (
 	"fmt"
@@ -11,34 +13,34 @@ import (
 )
 
 const (
-	txQueueLen  = 16
+	QueueLen    = 16
 	rxPoll      = 10 * time.Millisecond
 	statTimeout = 100 * time.Millisecond
 )
 
-// sniff enables the hex dump of the bytes exchanged with the transceiver.
-var sniff atomic.Bool
+// Sniff enables the hex dump of the bytes exchanged with the transceiver.
+var Sniff atomic.Bool
 
-// out receives everything the transmit goroutine prints.
-var out io.Writer = os.Stdout
+// Out receives everything Run prints.
+var Out io.Writer = os.Stdout
 
 func dump(prefix string, buf []byte) {
-	if sniff.Load() {
-		fmt.Fprintf(out, "%s % x\n", prefix, buf)
+	if Sniff.Load() {
+		fmt.Fprintf(Out, "%s % x\n", prefix, buf)
 	}
 }
 
-type cmdKind uint8
+type Kind uint8
 
 const (
-	cmdSwitch cmdKind = iota
-	cmdStat
+	CmdSwitch Kind = iota
+	CmdStat
 )
 
-type command struct {
-	kind cmdKind
-	sw   *light.Switch
-	on   bool
+type Command struct {
+	Kind Kind
+	Sw   *light.Switch
+	On   bool
 }
 
 type receiver struct {
@@ -60,17 +62,17 @@ func (r *receiver) handle(data []byte) {
 			r.gotState = true
 		case r.stat && s == ncn.U_SystemStatInd && !r.gotSystemStat:
 			r.gotSystemStat = true
-		case !sniff.Load():
+		case !Sniff.Load():
 			continue
 		}
-		fmt.Fprintf(out, "  %s (%#02x)\n", ncn.Describe(s, v), v)
+		fmt.Fprintf(Out, "  %s (%#02x)\n", ncn.Describe(s, v), v)
 	}
 }
 
-// transmit sends a telegram for every command received on cmds and reports
+// Run sends a telegram for every command received on cmds and reports
 // whatever the transceiver returns in between. It is the only user of d while
 // it runs. It returns once cmds is closed and drained, closing done.
-func transmit(d io.ReadWriter, dev *light.Device, cmds <-chan command, done chan<- struct{}) {
+func Run(d io.ReadWriter, dev *light.Device, cmds <-chan Command, done chan<- struct{}) {
 	var input [128]byte
 	var rx receiver
 
@@ -84,19 +86,19 @@ func transmit(d io.ReadWriter, dev *light.Device, cmds <-chan command, done chan
 			if !ok {
 				return
 			}
-			switch cmd.kind {
-			case cmdSwitch:
-				tg := dev.Telegram(cmd.sw, cmd.on)
+			switch cmd.Kind {
+			case CmdSwitch:
+				tg := dev.Telegram(cmd.Sw, cmd.On)
 				buf, err := tg.Pack()
 				if err != nil {
-					fmt.Fprintln(os.Stderr, err)
+					fmt.Fprintln(Out, err)
 					continue
 				}
 				dump(">", buf)
 				if _, err := ncn.TxData(d, buf); err != nil {
-					fmt.Fprintln(os.Stderr, err)
+					fmt.Fprintln(Out, err)
 				}
-			case cmdStat:
+			case CmdStat:
 				stat(d, &rx, input[:])
 			}
 		case <-ticker.C:
@@ -113,7 +115,7 @@ func stat(d io.ReadWriter, rx *receiver, input []byte) {
 	req := [...]byte{ncn.U_StateReq, ncn.U_SystemStatReq}
 	dump(">", req[:])
 	if _, err := d.Write(req[:]); err != nil {
-		fmt.Fprintln(os.Stderr, err)
+		fmt.Fprintln(Out, err)
 		return
 	}
 
@@ -130,9 +132,9 @@ func stat(d io.ReadWriter, rx *receiver, input []byte) {
 		}
 	}
 	if !rx.gotState {
-		fmt.Fprintln(out, "  no U_State.ind reply")
+		fmt.Fprintln(Out, "  no U_State.ind reply")
 	}
 	if !rx.gotSystemStat {
-		fmt.Fprintln(out, "  no U_SystemStat.ind reply")
+		fmt.Fprintln(Out, "  no U_SystemStat.ind reply")
 	}
 }

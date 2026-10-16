@@ -7,6 +7,8 @@ require (
 	github.com/vapourismo/knx-go v0.0.0-20260813172143-02e535310602
 	github.com/zieckey/goini v0.0.0-20240615065340-08ee21c836fb
 	github.com/ziutek/ftdi v0.0.1
+	tinygo.org/x/drivers v0.36.0
+	tinygo.org/x/tinyfs v0.5.0
 )
 
 require (

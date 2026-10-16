@@ -3,6 +3,8 @@ package main
 import (
 	"flag"
 	"fmt"
+	"knixx/bus"
+	"knixx/cli"
 	"knixx/config"
 	"os"
 
@@ -42,73 +44,20 @@ func main() {
 	d.SetLineProperties(ftdi.DataBits8, ftdi.StopBits1, ftdi.ParityNone)
 	d.PurgeWriteBuffer() // rx
 
-	cmds := make(chan command, txQueueLen)
+	cmds := make(chan bus.Command, bus.QueueLen)
 	done := make(chan struct{})
-	go transmit(d, dev, cmds, done)
+	go bus.Run(d, dev, cmds, done)
 
 	shell := ishell.New()
-	shell.AddCmd(&ishell.Cmd{
-		Name: "switch",
-		Help: switchUsage,
-		Func: func(c *ishell.Context) {
-			name, on, err := parseSwitch(c.Args)
-			if err != nil {
-				c.Println(err)
-				return
-			}
-			sw := dev.Switch(name)
-			if sw == nil {
-				c.Println("unknown switch:", name)
-				return
-			}
-			enqueue(c, cmds, command{kind: cmdSwitch, sw: sw, on: on})
-		},
-	})
-	shell.AddCmd(&ishell.Cmd{
-		Name: "stat",
-		Help: "report the transceiver state and system status",
-		Func: func(c *ishell.Context) {
-			if len(c.Args) != 0 {
-				c.Println("usage: stat")
-				return
-			}
-			enqueue(c, cmds, command{kind: cmdStat})
-		},
-	})
-	shell.AddCmd(&ishell.Cmd{
-		Name: "sniff",
-		Help: sniffUsage,
-		Func: func(c *ishell.Context) {
-			switch len(c.Args) {
-			case 0:
-				if sniff.Load() {
-					c.Println("sniff is on")
-				} else {
-					c.Println("sniff is off")
-				}
-			case 1:
-				on, ok := parseOnOff(c.Args[0])
-				if !ok {
-					c.Println(sniffUsage)
-					return
-				}
-				sniff.Store(on)
-			default:
-				c.Println(sniffUsage)
-			}
-		},
-	})
+	for _, cmd := range cli.Commands(dev, cmds) {
+		shell.AddCmd(&ishell.Cmd{
+			Name: cmd.Name,
+			Help: cmd.Help,
+			Func: func(c *ishell.Context) { cmd.Func(c.Args, os.Stdout) },
+		})
+	}
 	shell.Run()
 
 	close(cmds)
 	<-done
-}
-
-// enqueue hands cmd to the transmit goroutine without blocking the shell.
-func enqueue(c *ishell.Context, cmds chan<- command, cmd command) {
-	select {
-	case cmds <- cmd:
-	default:
-		c.Println("tx queue full")
-	}
 }
