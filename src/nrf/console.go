@@ -4,16 +4,14 @@ package main
 
 import (
 	"knixx/cli"
+	"knixx/lineedit"
 	"machine"
 	"time"
 )
 
 const (
-	prompt       = ">>> "
-	consolePoll  = 10 * time.Millisecond
-	maxLineLen   = 80
-	keyBackspace = 0x08
-	keyDelete    = 0x7f
+	prompt      = ">>> "
+	consolePoll = 10 * time.Millisecond
 )
 
 // crlf translates "\n" into "\r\n" for serial terminals.
@@ -38,10 +36,8 @@ var console crlf
 // The banner is printed once the first key arrives, so that it is not lost
 // before a terminal is attached.
 func runConsole(cmds []cli.Cmd, banner []byte) {
-	var line [maxLineLen]byte
-	n := 0
+	ed := lineedit.Editor{Prompt: prompt, Out: machine.Serial}
 	greeted := false
-	lastCR := false
 
 	for {
 		if machine.Serial.Buffered() == 0 {
@@ -57,29 +53,17 @@ func runConsole(cmds []cli.Cmd, banner []byte) {
 			console.Write(banner)
 			console.Write([]byte(prompt))
 			if b == '\r' || b == '\n' {
-				lastCR = b == '\r'
+				// Let the editor see the CR so that a following LF is
+				// taken as part of the pair; the empty line is dropped.
+				ed.Feed(b)
 				continue
 			}
 		}
 
-		switch {
-		case b == '\n' && lastCR:
-			// second half of a CR LF pair
-		case b == '\r' || b == '\n':
+		if line, done := ed.Feed(b); done {
 			console.Write([]byte{'\n'})
-			cli.Exec(cmds, string(line[:n]), console)
-			n = 0
+			cli.Exec(cmds, string(line), console)
 			console.Write([]byte(prompt))
-		case b == keyBackspace || b == keyDelete:
-			if n > 0 {
-				n--
-				machine.Serial.Write([]byte{'\b', ' ', '\b'})
-			}
-		case b >= ' ' && b < keyDelete && n < len(line):
-			line[n] = b
-			n++
-			machine.Serial.WriteByte(b)
 		}
-		lastCR = b == '\r'
 	}
 }
