@@ -10,6 +10,8 @@ import (
 	"os"
 	"sync/atomic"
 	"time"
+
+	"github.com/vapourismo/knx-go/knx/cemi"
 )
 
 const (
@@ -17,6 +19,10 @@ const (
 	rxPoll      = 10 * time.Millisecond
 	statTimeout = 100 * time.Millisecond
 )
+
+// conTimeout bounds the wait for the L_Data.con of a sent telegram. It
+// covers the NCN5121's worst case of 3 NACK and 3 BUSY repetitions.
+var conTimeout = 500 * time.Millisecond
 
 // Sniff enables the hex dump of the bytes exchanged with the transceiver.
 var Sniff atomic.Bool
@@ -52,6 +58,8 @@ type receiver struct {
 	// stat requests that a U_State.ind and U_SystemStat.ind be reported in
 	// full; the flags record which of the two have been seen.
 	stat, gotState, gotSystemStat bool
+	// gotCon records an L_Data.con and conPositive its outcome.
+	gotCon, conPositive bool
 }
 
 // handle dumps data and reports the services it contains.
@@ -59,6 +67,9 @@ func (r *receiver) handle(data []byte) {
 	dump("<", data)
 	for _, b := range data {
 		s, v := r.parser.Feed(b)
+		if s == ncn.L_DataCon {
+			r.gotCon, r.conPositive = true, ncn.ConPositive(v)
+		}
 		switch {
 		case s == ncn.None:
 			continue
@@ -73,22 +84,51 @@ func (r *receiver) handle(data []byte) {
 	}
 }
 
-// Run sends a telegram for every command received on cmds and reports
-// whatever the transceiver returns in between. It is the only user of d while
-// it runs, and works on its own copy of dev, which CmdConfig replaces. It
-// returns once cmds is closed and drained, closing done.
+// Run executes the commands received on cmds and reports whatever the
+// transceiver returns in between. A switch command sends one telegram per
+// bound group, each after the previous one was confirmed by L_Data.con or
+// timed out; further commands wait until all groups are done. Run is the only
+// user of d while it runs, and works on its own copy of dev, which CmdConfig
+// replaces. It returns once cmds is closed and drained, closing done.
 func Run(d io.ReadWriter, dev *light.Device, cmds <-chan Command, done chan<- struct{}) {
 	var input [128]byte
 	var rx receiver
 	cur := *dev
+
+	// The switch command being sent, and the index of its next group.
+	var pending bool
+	var sw *light.Switch
+	var on bool
+	var next uint8
+	// The group whose L_Data.con is awaited.
+	var awaiting bool
+	var group uint16
+	var deadline time.Time
 
 	defer close(done)
 	ticker := time.NewTicker(rxPoll)
 	defer ticker.Stop()
 
 	for {
+		if pending && !awaiting {
+			if next == sw.NGroups {
+				pending = false
+			} else {
+				group = sw.Groups[next]
+				next++
+				if send(d, &cur, group, on) {
+					awaiting, rx.gotCon = true, false
+					deadline = time.Now().Add(conTimeout)
+				}
+			}
+		}
+
+		in := cmds
+		if pending || awaiting {
+			in = nil
+		}
 		select {
-		case cmd, ok := <-cmds:
+		case cmd, ok := <-in:
 			if !ok {
 				return
 			}
@@ -98,16 +138,7 @@ func Run(d io.ReadWriter, dev *light.Device, cmds <-chan Command, done chan<- st
 					fmt.Fprintln(Out, "bus: no switch", cmd.Switch)
 					continue
 				}
-				tg := cur.Telegram(&cur.Switches[cmd.Switch], cmd.On)
-				buf, err := tg.Pack()
-				if err != nil {
-					fmt.Fprintln(Out, err)
-					continue
-				}
-				dump(">", buf)
-				if _, err := ncn.TxData(d, buf); err != nil {
-					fmt.Fprintln(Out, err)
-				}
+				pending, sw, on, next = true, &cur.Switches[cmd.Switch], cmd.On, 0
 			case CmdStat:
 				stat(d, &rx, input[:])
 			case CmdConfig:
@@ -117,8 +148,38 @@ func Run(d io.ReadWriter, dev *light.Device, cmds <-chan Command, done chan<- st
 			if n, _ := d.Read(input[:]); n > 0 {
 				rx.handle(input[:n])
 			}
+			if !awaiting {
+				continue
+			}
+			switch {
+			case rx.gotCon:
+				awaiting = false
+				if !rx.conPositive && !Sniff.Load() {
+					fmt.Fprintln(Out, "  L_Data.con: negative for", cemi.GroupAddr(group))
+				}
+			case time.Now().After(deadline):
+				awaiting = false
+				fmt.Fprintln(Out, "  no L_Data.con for", cemi.GroupAddr(group))
+			}
 		}
 	}
+}
+
+// send transmits the telegram setting group to on. It reports whether the
+// telegram was handed to the transceiver.
+func send(d io.Writer, dev *light.Device, group uint16, on bool) bool {
+	tg := dev.Telegram(group, on)
+	buf, err := tg.Pack()
+	if err != nil {
+		fmt.Fprintln(Out, err)
+		return false
+	}
+	dump(">", buf)
+	if _, err := ncn.TxData(d, buf); err != nil {
+		fmt.Fprintln(Out, err)
+		return false
+	}
+	return true
 }
 
 // stat requests the state and system status of the transceiver and waits up

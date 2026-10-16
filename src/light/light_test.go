@@ -11,8 +11,8 @@ func testDevice() *Device {
 	return &Device{
 		Individual: uint16(cemi.NewIndividualAddr3(7, 8, 1)),
 		Switches: [NumSwitches]Switch{
-			{Name: "A", Group: uint16(cemi.NewGroupAddr3(0, 0, 2))},
-			{Name: "B", Group: uint16(cemi.NewGroupAddr3(0, 0, 3))},
+			NewSwitch("A", uint16(cemi.NewGroupAddr3(0, 0, 2))),
+			NewSwitch("B", uint16(cemi.NewGroupAddr3(0, 0, 3))),
 		},
 	}
 }
@@ -43,7 +43,7 @@ func TestTelegram(t *testing.T) {
 		{"B", true, []byte{0xbc, 0x78, 0x01, 0x00, 0x03, 0x81, 0x00, 0x81, 0x39}},
 	}
 	for _, tt := range tests {
-		tg := d.Telegram(d.Switch(tt.name), tt.on)
+		tg := d.Telegram(d.Switch(tt.name).Groups[0], tt.on)
 		got, err := tg.Pack()
 		if err != nil {
 			t.Fatalf("%s on=%v: %v", tt.name, tt.on, err)
@@ -51,5 +51,16 @@ func TestTelegram(t *testing.T) {
 		if !bytes.Equal(got, tt.want) {
 			t.Errorf("%s on=%v: got % x, want % x", tt.name, tt.on, got, tt.want)
 		}
+	}
+}
+
+func TestNewSwitch(t *testing.T) {
+	sw := NewSwitch("A", 1, 2, 3)
+	if got := sw.GroupList(); len(got) != 3 || got[0] != 1 || got[2] != 3 {
+		t.Errorf("GroupList = %v", got)
+	}
+	many := make([]uint16, MaxGroups+2)
+	if sw := NewSwitch("B", many...); sw.NGroups != MaxGroups {
+		t.Errorf("NGroups = %d, want %d", sw.NGroups, MaxGroups)
 	}
 }

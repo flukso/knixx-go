@@ -1,6 +1,7 @@
 package config
 
 import (
+	"knixx/light"
 	"os"
 	"path/filepath"
 	"testing"
@@ -42,7 +43,7 @@ group = 0/0/3
 		{"B", uint16(cemi.NewGroupAddr3(0, 0, 3))},
 	} {
 		sw := dev.Switches[i]
-		if sw.Name != want.name || sw.Group != want.group {
+		if sw.Name != want.name || sw.NGroups != 1 || sw.Groups[0] != want.group {
 			t.Errorf("Switches[%d] = %+v, want %+v", i, sw, want)
 		}
 	}
@@ -143,5 +144,53 @@ func TestFileStore(t *testing.T) {
 	}
 	if _, err := Load(path); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestGroupLists(t *testing.T) {
+	dev, err := Parse([]byte("[device]\nindividual = 7.8.1\n[A]\ngroup = 0/0/1,0/0/5 , 1/2/3\n[B]\ngroup = 0/0/2\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := Get(dev, "A.group"); v != "0/0/1, 0/0/5, 1/2/3" {
+		t.Errorf("A.group = %q", v)
+	}
+	if v, _ := Get(dev, "B.group"); v != "0/0/2" {
+		t.Errorf("B.group = %q", v)
+	}
+	again, err := Parse(Format(dev))
+	if err != nil || *again != *dev {
+		t.Errorf("round trip: %+v, %v", again, err)
+	}
+
+	if err := Set(dev, "B.group", "0/0/3,0/0/4"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := Get(dev, "B.group"); v != "0/0/3, 0/0/4" {
+		t.Errorf("B.group = %q", v)
+	}
+
+	before := *dev
+	for _, value := range []string{
+		"",
+		"0/0/1,",
+		",0/0/1",
+		"0/0/1,,0/0/2",
+		"0/0/1, 0/0/1",
+		"0/0/1, nope",
+		"0/0/1,0/0/2,0/0/3,0/0/4,0/0/5,0/0/6,0/0/7,0/0/8,0/0/9",
+	} {
+		if err := Set(dev, "A.group", value); err == nil {
+			t.Errorf("Set(A.group, %q): expected an error", value)
+		}
+	}
+	if *dev != before {
+		t.Errorf("failed Set modified the device: %+v", dev)
+	}
+	if err := Set(dev, "A.group", "0/0/1,0/0/2,0/0/3,0/0/4,0/0/5,0/0/6,0/0/7,0/0/8"); err != nil {
+		t.Errorf("Set with %d groups: %v", light.MaxGroups, err)
+	}
+	if _, err := Parse([]byte("[device]\nindividual = 7.8.1\n[A]\ngroup = 0/0/1, 0/0/1\n[B]\ngroup = 0/0/2\n")); err == nil {
+		t.Error("Parse with a duplicate group: expected an error")
 	}
 }

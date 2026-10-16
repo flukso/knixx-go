@@ -55,8 +55,8 @@ func TestExec(t *testing.T) {
 	dev := &light.Device{
 		Individual: 0x7801,
 		Switches: [light.NumSwitches]light.Switch{
-			{Name: "A", Group: 0x0002},
-			{Name: "B", Group: 0x0003},
+			light.NewSwitch("A", 0x0002),
+			light.NewSwitch("B", 0x0003),
 		},
 	}
 	queue := make(chan bus.Command, 2)
@@ -173,6 +173,14 @@ func TestConfig(t *testing.T) {
 	if got := <-queue; got.Kind != bus.CmdConfig || got.Dev != *dev {
 		t.Errorf("queued %+v", got)
 	}
+
+	if got := exec("config set A.group 0/0/1, 0/0/5,1/2/3"); got != "A.group = 0/0/1, 0/0/5, 1/2/3 (saved)\n" {
+		t.Errorf("config set list: %q", got)
+	}
+	if got := exec("config get a.group"); got != "0/0/1, 0/0/5, 1/2/3\n" {
+		t.Errorf("config get list: %q", got)
+	}
+	<-queue
 
 	store.err = errors.New("flash unavailable")
 	if got := exec("config set A.group 0/0/9"); !strings.Contains(got, "not saved: flash unavailable") {

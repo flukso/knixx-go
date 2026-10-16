@@ -75,11 +75,16 @@ func (p *Parser) Feed(b byte) (Service, byte) {
 	return None, 0
 }
 
+// ConPositive reports whether an L_Data.con status byte confirms delivery.
+func ConPositive(b byte) bool {
+	return b&lDataConPositive != 0
+}
+
 // Describe renders a service returned by Parser.Feed.
 func Describe(s Service, b byte) string {
 	switch s {
 	case L_DataCon:
-		if b&lDataConPositive != 0 {
+		if ConPositive(b) {
 			return "L_Data.con: positive"
 		}
 		return "L_Data.con: negative"

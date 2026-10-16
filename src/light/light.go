@@ -7,11 +7,30 @@ import (
 	"github.com/vapourismo/knx-go/knx/dpt"
 )
 
-const NumSwitches = 2
+const (
+	NumSwitches = 2
+	// MaxGroups bounds the group addresses a switch can be bound to.
+	MaxGroups = 8
+)
 
+// Switch sends to each of its group addresses Groups[:NGroups].
 type Switch struct {
-	Name  string
-	Group uint16
+	Name    string
+	Groups  [MaxGroups]uint16
+	NGroups uint8
+}
+
+// NewSwitch returns a switch bound to groups. Groups beyond MaxGroups are
+// dropped.
+func NewSwitch(name string, groups ...uint16) Switch {
+	sw := Switch{Name: name}
+	sw.NGroups = uint8(copy(sw.Groups[:], groups))
+	return sw
+}
+
+// GroupList returns the group addresses the switch is bound to.
+func (s *Switch) GroupList() []uint16 {
+	return s.Groups[:s.NGroups]
 }
 
 type Device struct {
@@ -39,14 +58,15 @@ func (d *Device) SwitchIndex(name string) (uint8, bool) {
 	return 0, false
 }
 
-// Telegram builds the group value write that sets sw to the requested state.
-func (d *Device) Telegram(sw *Switch, on bool) tp1.Telegram {
+// Telegram builds the group value write that sets group to the requested
+// state.
+func (d *Device) Telegram(group uint16, on bool) tp1.Telegram {
 	return tp1.Telegram{
 		Ctrl: tp1.Ctrl{
 			Repeat:   false,
 			Priority: tp1.PriorityLow},
 		Src:  d.Individual,
-		Dest: sw.Group,
+		Dest: group,
 		Npci: tp1.Npci{
 			AddrType: tp1.AddrGroup,
 			Routing:  0},

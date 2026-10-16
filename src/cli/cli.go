@@ -16,7 +16,7 @@ const (
 	switchUsage = "usage: switch <A|B> <on|off>"
 	sniffUsage  = "usage: sniff <on|off>"
 	statUsage   = "usage: stat"
-	configUsage = "usage: config [get <key> | set <key> <value>]"
+	configUsage = "usage: config [get <key> | set <key> <value>[,<value>...]]"
 )
 
 var errUsage = errors.New(switchUsage)
@@ -108,10 +108,11 @@ func configCmd(dev *light.Device, store config.Store, cmds chan<- bus.Command, a
 			return
 		}
 		fmt.Fprintln(w, v)
-	case len(args) == 3 && args[0] == "set":
+	case len(args) >= 3 && args[0] == "set":
+		// A group list may be typed with spaces after the commas.
 		key := args[1]
 		prev := *dev
-		if err := config.Set(dev, key, args[2]); err != nil {
+		if err := config.Set(dev, key, strings.Join(args[2:], "")); err != nil {
 			fmt.Fprintln(w, err)
 			return
 		}
