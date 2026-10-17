@@ -3,6 +3,7 @@ package lineedit
 import (
 	"bytes"
 	"fmt"
+	"io"
 	"strings"
 	"testing"
 )
@@ -157,5 +158,35 @@ func TestLineBasics(t *testing.T) {
 	got = feed(e, strings.Repeat("y", MaxLine+5)+"\r")
 	if len(got) != 1 || len(got[0]) != MaxLine {
 		t.Errorf("long line %d bytes, want %d", len(got[0]), MaxLine)
+	}
+}
+
+// countingWriter counts the calls to Write.
+type countingWriter struct {
+	bytes.Buffer
+	writes int
+}
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	c.writes++
+	return c.Buffer.Write(p)
+}
+
+func TestRedrawSingleWrite(t *testing.T) {
+	var out countingWriter
+	e := &Editor{Prompt: ">>> ", Out: &out}
+	feed(e, "switch A on\r")
+	out.Reset()
+	out.writes = 0
+	feed(e, up)
+	if out.writes != 1 {
+		t.Errorf("redraw took %d writes, want 1", out.writes)
+	}
+	if want := "\r>>> switch A on\x1b[K"; out.String() != want {
+		t.Errorf("redraw %q, want %q", out.String(), want)
+	}
+	e.Out = io.Discard
+	if allocs := testing.AllocsPerRun(100, func() { feed(e, up+down) }); allocs != 0 {
+		t.Errorf("redraw allocates %.0f times per run", allocs)
 	}
 }

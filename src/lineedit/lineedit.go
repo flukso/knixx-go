@@ -10,6 +10,8 @@ import (
 const (
 	MaxLine    = 80
 	HistoryLen = 8
+	// MaxPrompt is the longest prompt redrawn without allocating.
+	MaxPrompt = 16
 
 	keyCtrlN     = 0x0e
 	keyCtrlP     = 0x10
@@ -49,6 +51,9 @@ type Editor struct {
 
 	esc    uint8
 	lastCR bool
+
+	// redraw assembles a redrawn line so that it is written at once.
+	redraw [1 + MaxPrompt + MaxLine + 3]byte
 }
 
 // Feed processes one input byte. It returns the completed line when b ends
@@ -153,11 +158,14 @@ func (e *Editor) down() {
 	}
 }
 
-// show replaces the line being edited with s and redraws it.
+// show replaces the line being edited with s and redraws it. The redraw is
+// handed to Out in a single write, so that a USB serial port sends it in as
+// few packets as possible instead of a burst of small ones.
 func (e *Editor) show(s []byte) {
 	e.n = uint8(copy(e.line[:], s))
-	io.WriteString(e.Out, "\r")
-	io.WriteString(e.Out, e.Prompt)
-	e.Out.Write(e.line[:e.n])
-	io.WriteString(e.Out, "\x1b[K")
+	b := append(e.redraw[:0], '\r')
+	b = append(b, e.Prompt...)
+	b = append(b, e.line[:e.n]...)
+	b = append(b, "\x1b[K"...)
+	e.Out.Write(b)
 }
