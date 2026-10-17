@@ -1,7 +1,7 @@
 package config
 
 import (
-	"knixx/light"
+	"knixx/thunder"
 	"os"
 	"path/filepath"
 	"testing"
@@ -188,9 +188,67 @@ func TestGroupLists(t *testing.T) {
 		t.Errorf("failed Set modified the device: %+v", dev)
 	}
 	if err := Set(dev, "A.group", "0/0/1,0/0/2,0/0/3,0/0/4,0/0/5,0/0/6,0/0/7,0/0/8"); err != nil {
-		t.Errorf("Set with %d groups: %v", light.MaxGroups, err)
+		t.Errorf("Set with %d groups: %v", thunder.MaxGroups, err)
 	}
 	if _, err := Parse([]byte("[device]\nindividual = 7.8.1\n[A]\ngroup = 0/0/1, 0/0/1\n[B]\ngroup = 0/0/2\n")); err == nil {
 		t.Error("Parse with a duplicate group: expected an error")
+	}
+}
+
+func TestSensor(t *testing.T) {
+	const noSensor = "[device]\nindividual = 7.8.1\n[A]\ngroup = 0/0/1\n[B]\ngroup = 0/0/2\n"
+	dev, err := Parse([]byte(noSensor))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dev.Sensor != (thunder.Sensor{}) {
+		t.Errorf("Sensor without a section = %+v, want unbound", dev.Sensor)
+	}
+	for _, key := range []string{"sensor.temperature", "sensor.humidity"} {
+		if v, _ := Get(dev, key); v != "-" {
+			t.Errorf("%s = %q, want -", key, v)
+		}
+	}
+	if got := string(Format(dev)); got != "[device]\nindividual = 7.8.1\n\n[A]\ngroup = 0/0/1\n\n[B]\ngroup = 0/0/2\n" {
+		t.Errorf("Format without sensor = %q", got)
+	}
+
+	dev, err = Parse([]byte(noSensor + "[sensor]\nhumidity = 1/2/3\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := (thunder.Sensor{Humidity: uint16(cemi.NewGroupAddr3(1, 2, 3))}); dev.Sensor != want {
+		t.Errorf("Sensor = %+v, want %+v", dev.Sensor, want)
+	}
+
+	if err := Set(dev, "Sensor.Temperature", "0/1/1"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := Get(dev, "sensor.temperature"); v != "0/1/1" {
+		t.Errorf("sensor.temperature = %q", v)
+	}
+	again, err := Parse(Format(dev))
+	if err != nil || *again != *dev {
+		t.Errorf("round trip: %+v, %v", again, err)
+	}
+	if err := Set(dev, "sensor.humidity", "-"); err != nil || dev.Sensor.Humidity != 0 {
+		t.Errorf("unbind: %+v, %v", dev.Sensor, err)
+	}
+	again, err = Parse(Format(dev))
+	if err != nil || *again != *dev {
+		t.Errorf("round trip after unbind: %+v, %v", again, err)
+	}
+
+	before := *dev
+	for _, value := range []string{"", "0/1/1, 0/1/2", "nope", "1.1.1", "0/0/0"} {
+		if err := Set(dev, "sensor.temperature", value); err == nil {
+			t.Errorf("Set(sensor.temperature, %q): expected an error", value)
+		}
+	}
+	if *dev != before {
+		t.Errorf("failed Set modified the device: %+v", dev)
+	}
+	if _, err := Parse([]byte(noSensor + "[sensor]\ntemperature = nope\n")); err == nil {
+		t.Error("Parse with a bad sensor group: expected an error")
 	}
 }

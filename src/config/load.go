@@ -4,12 +4,12 @@ package config
 
 import (
 	"fmt"
-	"knixx/light"
+	"knixx/thunder"
 	"os"
 )
 
 // Load parses the ini file at path.
-func Load(path string) (*light.Device, error) {
+func Load(path string) (*thunder.Device, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)

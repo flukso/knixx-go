@@ -5,7 +5,7 @@ import (
 	"errors"
 	"knixx/bus"
 	"knixx/config"
-	"knixx/light"
+	"knixx/thunder"
 	"strings"
 	"testing"
 )
@@ -52,11 +52,11 @@ func TestParseOnOff(t *testing.T) {
 }
 
 func TestExec(t *testing.T) {
-	dev := &light.Device{
+	dev := &thunder.Device{
 		Individual: 0x7801,
-		Switches: [light.NumSwitches]light.Switch{
-			light.NewSwitch("A", 0x0002),
-			light.NewSwitch("B", 0x0003),
+		Switches: [thunder.NumSwitches]thunder.Switch{
+			thunder.NewSwitch("A", 0x0002),
+			thunder.NewSwitch("B", 0x0003),
 		},
 	}
 	queue := make(chan bus.Command, 2)

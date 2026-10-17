@@ -23,6 +23,7 @@ func main() {
 	cmds := make(chan bus.Command, bus.QueueLen)
 	done := make(chan struct{})
 	go bus.Run(machine.UART0, dev, cmds, done)
+	go runSensor(cmds)
 
-	runConsole(cli.Commands(dev, flashStore{}, cmds), log.Bytes())
+	runConsole(append(cli.Commands(dev, flashStore{}, cmds), sensorCmd()), log.Bytes())
 }

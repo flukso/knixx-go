@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"io"
 	"knixx/config"
-	"knixx/light"
+	"knixx/thunder"
 	"machine"
 	"os"
 
@@ -37,7 +37,7 @@ var (
 // writing the default configuration when there is none, and parses
 // knixx.ini. Progress is reported on log. When the flash or the file is
 // unusable it falls back to the built-in default.
-func loadConfig(log io.Writer) *light.Device {
+func loadConfig(log io.Writer) *thunder.Device {
 	data, err := readConfig(log)
 	if err == nil {
 		dev, err := config.Parse(data)

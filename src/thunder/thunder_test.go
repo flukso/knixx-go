@@ -1,10 +1,11 @@
-package light
+package thunder
 
 import (
 	"bytes"
 	"testing"
 
 	"github.com/vapourismo/knx-go/knx/cemi"
+	"github.com/vapourismo/knx-go/knx/dpt"
 )
 
 func testDevice() *Device {
@@ -50,6 +51,31 @@ func TestTelegram(t *testing.T) {
 		}
 		if !bytes.Equal(got, tt.want) {
 			t.Errorf("%s on=%v: got % x, want % x", tt.name, tt.on, got, tt.want)
+		}
+	}
+}
+
+func TestGroupWriteDPT9(t *testing.T) {
+	d := testDevice()
+	tests := []struct {
+		name  string
+		group uint16
+		data  []byte
+		want  []byte
+	}{
+		{"21.5 °C to 1/0/1", uint16(cemi.NewGroupAddr3(1, 0, 1)), dpt.DPT_9001(21.5).Pack(),
+			[]byte{0xbc, 0x78, 0x01, 0x08, 0x01, 0x83, 0x00, 0x80, 0x0c, 0x33, 0x0f}},
+		{"48.2 % to 1/0/2", uint16(cemi.NewGroupAddr3(1, 0, 2)), dpt.DPT_9007(48.2).Pack(),
+			[]byte{0xbc, 0x78, 0x01, 0x08, 0x02, 0x83, 0x00, 0x80, 0x14, 0xb5, 0x92}},
+	}
+	for _, tt := range tests {
+		tg := d.GroupWrite(tt.group, tt.data)
+		got, err := tg.Pack()
+		if err != nil {
+			t.Fatalf("%s: %v", tt.name, err)
+		}
+		if !bytes.Equal(got, tt.want) {
+			t.Errorf("%s: got % x, want % x", tt.name, got, tt.want)
 		}
 	}
 }

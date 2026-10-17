@@ -1,4 +1,6 @@
-package light
+// Package thunder models the knixx thunder board: its individual address, its
+// switches and its sensor, and builds the telegrams they send.
+package thunder
 
 import (
 	"knixx/tp1"
@@ -33,9 +35,17 @@ func (s *Switch) GroupList() []uint16 {
 	return s.Groups[:s.NGroups]
 }
 
+// Sensor holds the group addresses that temperature and humidity readings
+// are published to. 0 leaves a value unbound.
+type Sensor struct {
+	Temperature uint16
+	Humidity    uint16
+}
+
 type Device struct {
 	Individual uint16
 	Switches   [NumSwitches]Switch
+	Sensor     Sensor
 }
 
 // Switch looks up a switch by its case-insensitive name. It returns nil when
@@ -61,6 +71,12 @@ func (d *Device) SwitchIndex(name string) (uint8, bool) {
 // Telegram builds the group value write that sets group to the requested
 // state.
 func (d *Device) Telegram(group uint16, on bool) tp1.Telegram {
+	return d.GroupWrite(group, dpt.DPT_1001(on).Pack())
+}
+
+// GroupWrite builds the group value write of data, a value packed by a knx-go
+// dpt type, to group.
+func (d *Device) GroupWrite(group uint16, data []byte) tp1.Telegram {
 	return tp1.Telegram{
 		Ctrl: tp1.Ctrl{
 			Repeat:   false,
@@ -74,5 +90,5 @@ func (d *Device) Telegram(group uint16, on bool) tp1.Telegram {
 			Transport: tp1.UnnumberedDataPacket,
 			Sequence:  0},
 		Apci: tp1.GroupValueWrite,
-		Data: dpt.DPT_1001(on).Pack()}
+		Data: data}
 }

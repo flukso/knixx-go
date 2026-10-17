@@ -2,8 +2,8 @@ package bus
 
 import (
 	"bytes"
-	"knixx/light"
 	"knixx/ncn"
+	"knixx/thunder"
 	"strings"
 	"testing"
 	"time"
@@ -36,7 +36,7 @@ func (f *fakeDevice) Write(p []byte) (int, error) {
 	return f.Buffer.Write(p)
 }
 
-func run(t *testing.T, d *fakeDevice, dev *light.Device, queued []Command) string {
+func run(t *testing.T, d *fakeDevice, dev *thunder.Device, queued []Command) string {
 	t.Helper()
 	var captured bytes.Buffer
 	prev := Out
@@ -59,18 +59,18 @@ func run(t *testing.T, d *fakeDevice, dev *light.Device, queued []Command) strin
 	return captured.String()
 }
 
-func testDevice() *light.Device {
-	return &light.Device{
+func testDevice() *thunder.Device {
+	return &thunder.Device{
 		Individual: 0x7801,
-		Switches: [light.NumSwitches]light.Switch{
-			light.NewSwitch("A", 0x0002),
-			light.NewSwitch("B", 0x0003, 0x0004, 0x0005),
+		Switches: [thunder.NumSwitches]thunder.Switch{
+			thunder.NewSwitch("A", 0x0002),
+			thunder.NewSwitch("B", 0x0003, 0x0004, 0x0005),
 		},
 	}
 }
 
 // frames returns the requests for setting each group to on, in order.
-func frames(t *testing.T, dev *light.Device, on bool, groups ...uint16) []byte {
+func frames(t *testing.T, dev *thunder.Device, on bool, groups ...uint16) []byte {
 	t.Helper()
 	var want bytes.Buffer
 	for _, g := range groups {
@@ -186,7 +186,7 @@ func TestConfig(t *testing.T) {
 	Sniff.Store(false)
 	dev := testDevice()
 	moved := *dev
-	moved.Switches[0] = light.NewSwitch("A", 0x0909)
+	moved.Switches[0] = thunder.NewSwitch("A", 0x0909)
 
 	d := fakeDevice{confirm: true}
 	run(t, &d, dev, []Command{
@@ -200,5 +200,55 @@ func TestConfig(t *testing.T) {
 	}
 	if dev.Switches[0].Groups[0] != 0x0002 {
 		t.Errorf("Run modified the caller's device: %+v", dev)
+	}
+}
+
+// writes returns the requests for the given group value writes, in order.
+func writes(t *testing.T, dev *thunder.Device, ws ...write) []byte {
+	t.Helper()
+	var want bytes.Buffer
+	for _, w := range ws {
+		tg := dev.GroupWrite(w.group, w.data[:w.n])
+		buf, err := tg.Pack()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ncn.TxData(&want, buf)
+	}
+	return want.Bytes()
+}
+
+func TestSensor(t *testing.T) {
+	Sniff.Store(false)
+	dev := testDevice()
+	dev.Sensor = thunder.Sensor{Temperature: 0x0101, Humidity: 0x0102}
+	reading := Command{Kind: CmdSensor, Temperature: 21500, Humidity: 4820}
+
+	d := fakeDevice{confirm: true}
+	run(t, &d, dev, []Command{reading, {Kind: CmdSwitch, Switch: 0, On: true}})
+	want := append(writes(t, dev,
+		newWrite(0x0101, []byte{0x00, 0x0c, 0x33}), // 21.5 °C
+		newWrite(0x0102, []byte{0x00, 0x14, 0xb5}), // 48.2 %
+	), frames(t, dev, true, 0x0002)...)
+	if !bytes.Equal(d.Bytes(), want) {
+		t.Errorf("got % x, want % x", d.Bytes(), want)
+	}
+	if d.overlap {
+		t.Error("a frame was sent before the previous L_Data.con")
+	}
+
+	// An unbound value is not sent.
+	dev.Sensor.Temperature = 0
+	d = fakeDevice{confirm: true}
+	run(t, &d, dev, []Command{reading})
+	if want := writes(t, dev, newWrite(0x0102, []byte{0x00, 0x14, 0xb5})); !bytes.Equal(d.Bytes(), want) {
+		t.Errorf("humidity only: got % x, want % x", d.Bytes(), want)
+	}
+
+	dev.Sensor.Humidity = 0
+	d = fakeDevice{confirm: true}
+	run(t, &d, dev, []Command{reading})
+	if d.Len() != 0 {
+		t.Errorf("unbound sensor sent % x", d.Bytes())
 	}
 }

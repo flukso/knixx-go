@@ -5,13 +5,14 @@ package bus
 import (
 	"fmt"
 	"io"
-	"knixx/light"
 	"knixx/ncn"
+	"knixx/thunder"
 	"os"
 	"sync/atomic"
 	"time"
 
 	"github.com/vapourismo/knx-go/knx/cemi"
+	"github.com/vapourismo/knx-go/knx/dpt"
 )
 
 const (
@@ -42,6 +43,7 @@ const (
 	CmdSwitch Kind = iota
 	CmdStat
 	CmdConfig
+	CmdSensor
 )
 
 type Command struct {
@@ -50,7 +52,27 @@ type Command struct {
 	Switch uint8
 	On     bool
 	// Dev replaces the device configuration for CmdConfig.
-	Dev light.Device
+	Dev thunder.Device
+	// Temperature in milli degrees Celsius and Humidity in hundredths of a
+	// percent are published to the sensor's groups for CmdSensor.
+	Temperature int32
+	Humidity    int32
+}
+
+// write is a group value write waiting to be sent.
+type write struct {
+	group uint16
+	data  [maxData]byte
+	n     uint8
+}
+
+// maxData fits the packed values sent: DPT 1 and DPT 9.
+const maxData = 3
+
+func newWrite(group uint16, data []byte) write {
+	w := write{group: group}
+	w.n = uint8(copy(w.data[:], data))
+	return w
 }
 
 type receiver struct {
@@ -86,20 +108,19 @@ func (r *receiver) handle(data []byte) {
 
 // Run executes the commands received on cmds and reports whatever the
 // transceiver returns in between. A switch command sends one telegram per
-// bound group, each after the previous one was confirmed by L_Data.con or
-// timed out; further commands wait until all groups are done. Run is the only
+// bound group and a sensor command one per bound value, each after the
+// previous one was confirmed by L_Data.con or timed out; further commands
+// wait until all telegrams are done. Run is the only
 // user of d while it runs, and works on its own copy of dev, which CmdConfig
 // replaces. It returns once cmds is closed and drained, closing done.
-func Run(d io.ReadWriter, dev *light.Device, cmds <-chan Command, done chan<- struct{}) {
+func Run(d io.ReadWriter, dev *thunder.Device, cmds <-chan Command, done chan<- struct{}) {
 	var input [128]byte
 	var rx receiver
 	cur := *dev
 
-	// The switch command being sent, and the index of its next group.
-	var pending bool
-	var sw *light.Switch
-	var on bool
-	var next uint8
+	// The writes of the command being sent, and the index of the next one.
+	var queue [thunder.MaxGroups]write
+	var nq, next uint8
 	// The group whose L_Data.con is awaited.
 	var awaiting bool
 	var group uint16
@@ -110,21 +131,18 @@ func Run(d io.ReadWriter, dev *light.Device, cmds <-chan Command, done chan<- st
 	defer ticker.Stop()
 
 	for {
-		if pending && !awaiting {
-			if next == sw.NGroups {
-				pending = false
-			} else {
-				group = sw.Groups[next]
-				next++
-				if send(d, &cur, group, on) {
-					awaiting, rx.gotCon = true, false
-					deadline = time.Now().Add(conTimeout)
-				}
+		if next < nq && !awaiting {
+			w := &queue[next]
+			group = w.group
+			next++
+			if send(d, &cur, group, w.data[:w.n]) {
+				awaiting, rx.gotCon = true, false
+				deadline = time.Now().Add(conTimeout)
 			}
 		}
 
 		in := cmds
-		if pending || awaiting {
+		if next < nq || awaiting {
 			in = nil
 		}
 		select {
@@ -138,7 +156,22 @@ func Run(d io.ReadWriter, dev *light.Device, cmds <-chan Command, done chan<- st
 					fmt.Fprintln(Out, "bus: no switch", cmd.Switch)
 					continue
 				}
-				pending, sw, on, next = true, &cur.Switches[cmd.Switch], cmd.On, 0
+				data := dpt.DPT_1001(cmd.On).Pack()
+				nq, next = 0, 0
+				for _, g := range cur.Switches[cmd.Switch].GroupList() {
+					queue[nq] = newWrite(g, data)
+					nq++
+				}
+			case CmdSensor:
+				nq, next = 0, 0
+				if g := cur.Sensor.Temperature; g != 0 {
+					queue[nq] = newWrite(g, dpt.DPT_9001(float32(cmd.Temperature)/1000).Pack())
+					nq++
+				}
+				if g := cur.Sensor.Humidity; g != 0 {
+					queue[nq] = newWrite(g, dpt.DPT_9007(float32(cmd.Humidity)/100).Pack())
+					nq++
+				}
 			case CmdStat:
 				stat(d, &rx, input[:])
 			case CmdConfig:
@@ -165,10 +198,10 @@ func Run(d io.ReadWriter, dev *light.Device, cmds <-chan Command, done chan<- st
 	}
 }
 
-// send transmits the telegram setting group to on. It reports whether the
-// telegram was handed to the transceiver.
-func send(d io.Writer, dev *light.Device, group uint16, on bool) bool {
-	tg := dev.Telegram(group, on)
+// send transmits the group value write of data to group. It reports whether
+// the telegram was handed to the transceiver.
+func send(d io.Writer, dev *thunder.Device, group uint16, data []byte) bool {
+	tg := dev.GroupWrite(group, data)
 	buf, err := tg.Pack()
 	if err != nil {
 		fmt.Fprintln(Out, err)

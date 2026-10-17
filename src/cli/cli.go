@@ -8,7 +8,7 @@ import (
 	"io"
 	"knixx/bus"
 	"knixx/config"
-	"knixx/light"
+	"knixx/thunder"
 	"strings"
 )
 
@@ -31,7 +31,7 @@ type Cmd struct {
 // Commands returns the console commands. Commands that talk to the
 // transceiver are queued on cmds; configuration changes are applied to dev
 // and saved to store.
-func Commands(dev *light.Device, store config.Store, cmds chan<- bus.Command) []Cmd {
+func Commands(dev *thunder.Device, store config.Store, cmds chan<- bus.Command) []Cmd {
 	return []Cmd{
 		{
 			Name: "switch",
@@ -94,7 +94,7 @@ func Commands(dev *light.Device, store config.Store, cmds chan<- bus.Command) []
 	}
 }
 
-func configCmd(dev *light.Device, store config.Store, cmds chan<- bus.Command, args []string, w io.Writer) {
+func configCmd(dev *thunder.Device, store config.Store, cmds chan<- bus.Command, args []string, w io.Writer) {
 	switch {
 	case len(args) == 0:
 		for _, key := range config.Keys {
