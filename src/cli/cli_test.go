@@ -269,3 +269,63 @@ func TestConfigDump(t *testing.T) {
 		t.Errorf("replayed ini %q, want %q", dstStore.saved, want)
 	}
 }
+
+func TestConfigInit(t *testing.T) {
+	def, err := config.Parse(config.Default)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dev, err := config.Parse(config.Default)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, value := range map[string]string{
+		"device.individual": "1.2.3",
+		"A.group":           "1/1/1,1/1/2",
+		"sensor.humidity":   "-",
+	} {
+		if err := config.Set(dev, key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+	modified := *dev
+
+	queue := make(chan bus.Command, 1)
+	var store fakeStore
+	cmds := Commands(dev, &store, queue)
+	exec := func(line string) string {
+		var w bytes.Buffer
+		Exec(cmds, line, &w)
+		return w.String()
+	}
+
+	if got := exec("config init extra"); !strings.HasPrefix(got, "usage: config") || *dev != modified {
+		t.Errorf("config init extra: %q", got)
+	}
+
+	queue <- bus.Command{Kind: bus.CmdStat}
+	if got := exec("config init"); got != "tx queue full\n" || *dev != modified || store.saved != nil {
+		t.Errorf("full queue: output %q, dev %+v, saved %q", got, *dev, store.saved)
+	}
+	<-queue
+
+	got := exec("config init")
+	if !strings.Contains(got, "(saved)") || !strings.Contains(got, "device.individual = 7.8.1") {
+		t.Errorf("config init: %q", got)
+	}
+	if *dev != *def {
+		t.Errorf("device %+v, want %+v", *dev, *def)
+	}
+	if !bytes.Equal(store.saved, config.Default) {
+		t.Errorf("saved %q, want %q", store.saved, config.Default)
+	}
+	if cmd := <-queue; cmd.Kind != bus.CmdConfig || cmd.Dev != *def {
+		t.Errorf("queued %+v", cmd)
+	}
+
+	*dev = modified
+	store.err = errors.New("flash unavailable")
+	if got := exec("config init"); !strings.Contains(got, "not saved: flash unavailable") || *dev != *def {
+		t.Errorf("failed save: output %q, dev %+v", got, *dev)
+	}
+}

@@ -16,7 +16,7 @@ const (
 	switchUsage = "usage: switch <A|B> <on|off>"
 	sniffUsage  = "usage: sniff <on|off>"
 	statUsage   = "usage: stat"
-	configUsage = "usage: config [dump | get <key> | set <key> <value>[,<value>...]]"
+	configUsage = "usage: config [dump | init | get <key> | set <key> <value>[,<value>...]]"
 )
 
 var errUsage = errors.New(switchUsage)
@@ -97,10 +97,7 @@ func Commands(dev *thunder.Device, store config.Store, cmds chan<- bus.Command) 
 func configCmd(dev *thunder.Device, store config.Store, cmds chan<- bus.Command, args []string, w io.Writer) {
 	switch {
 	case len(args) == 0:
-		for _, key := range config.Keys {
-			v, _ := config.Get(dev, key)
-			fmt.Fprintf(w, "%s = %s\n", key, v)
-		}
+		list(dev, w)
 	case len(args) == 1 && args[0] == "dump":
 		// One set command per key, so that replaying them on another device
 		// reproduces this configuration and its ini file exactly.
@@ -108,6 +105,27 @@ func configCmd(dev *thunder.Device, store config.Store, cmds chan<- bus.Command,
 			v, _ := config.Get(dev, key)
 			fmt.Fprintf(w, "config set %s %s\n", key, v)
 		}
+	case len(args) == 1 && args[0] == "init":
+		def, err := config.Parse(config.Default)
+		if err != nil {
+			fmt.Fprintln(w, err)
+			return
+		}
+		select {
+		case cmds <- bus.Command{Kind: bus.CmdConfig, Dev: *def}:
+		default:
+			fmt.Fprintln(w, "tx queue full")
+			return
+		}
+		*dev = *def
+		// The embedded file is saved verbatim, so that the stored knixx.ini
+		// is identical to the one in the firmware.
+		if err := store.Save(config.Default); err != nil {
+			fmt.Fprintf(w, "knixx.ini reset to the built-in default (not saved: %v)\n", err)
+		} else {
+			fmt.Fprintln(w, "knixx.ini reset to the built-in default (saved)")
+		}
+		list(dev, w)
 	case len(args) == 2 && args[0] == "get":
 		v, err := config.Get(dev, args[1])
 		if err != nil {
@@ -138,6 +156,14 @@ func configCmd(dev *thunder.Device, store config.Store, cmds chan<- bus.Command,
 		fmt.Fprintf(w, "%s = %s (saved)\n", key, v)
 	default:
 		fmt.Fprintln(w, configUsage)
+	}
+}
+
+// list prints every configuration key with its value.
+func list(dev *thunder.Device, w io.Writer) {
+	for _, key := range config.Keys {
+		v, _ := config.Get(dev, key)
+		fmt.Fprintf(w, "%s = %s\n", key, v)
 	}
 }
 
