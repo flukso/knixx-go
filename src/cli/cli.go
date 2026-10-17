@@ -16,7 +16,7 @@ const (
 	switchUsage = "usage: switch <A|B> <on|off>"
 	sniffUsage  = "usage: sniff <on|off>"
 	statUsage   = "usage: stat"
-	configUsage = "usage: config [get <key> | set <key> <value>[,<value>...]]"
+	configUsage = "usage: config [dump | get <key> | set <key> <value>[,<value>...]]"
 )
 
 var errUsage = errors.New(switchUsage)
@@ -100,6 +100,13 @@ func configCmd(dev *thunder.Device, store config.Store, cmds chan<- bus.Command,
 		for _, key := range config.Keys {
 			v, _ := config.Get(dev, key)
 			fmt.Fprintf(w, "%s = %s\n", key, v)
+		}
+	case len(args) == 1 && args[0] == "dump":
+		// One set command per key, so that replaying them on another device
+		// reproduces this configuration and its ini file exactly.
+		for _, key := range config.Keys {
+			v, _ := config.Get(dev, key)
+			fmt.Fprintf(w, "config set %s %s\n", key, v)
 		}
 	case len(args) == 2 && args[0] == "get":
 		v, err := config.Get(dev, args[1])

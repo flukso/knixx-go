@@ -3,8 +3,11 @@ package cli
 import (
 	"bytes"
 	"errors"
+	"fmt"
+	"io"
 	"knixx/bus"
 	"knixx/config"
+	"knixx/lineedit"
 	"knixx/thunder"
 	"strings"
 	"testing"
@@ -192,5 +195,77 @@ func TestConfig(t *testing.T) {
 	before := *dev
 	if got := exec("config set A.group 0/0/7"); got != "tx queue full\n" || *dev != before {
 		t.Errorf("full queue: output %q, dev %+v", got, dev)
+	}
+}
+
+func TestConfigDump(t *testing.T) {
+	src, err := config.Parse(config.Default)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The widest values: a switch bound to the most groups of the longest
+	// form, which makes the longest dumped line.
+	var groups []string
+	for i := 0; i < thunder.MaxGroups; i++ {
+		groups = append(groups, fmt.Sprintf("31/7/%d", 255-i))
+	}
+	for key, value := range map[string]string{
+		"device.individual": "15.15.255",
+		"A.group":           strings.Join(groups, ","),
+		"sensor.humidity":   "-",
+	} {
+		if err := config.Set(src, key, value); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	srcQueue := make(chan bus.Command, 1)
+	var srcStore fakeStore
+	var out bytes.Buffer
+	Exec(Commands(src, &srcStore, srcQueue), "config dump", &out)
+	if srcStore.saved != nil || len(srcQueue) != 0 {
+		t.Errorf("dump saved %q, queued %d", srcStore.saved, len(srcQueue))
+	}
+	lines := strings.Split(strings.TrimSuffix(out.String(), "\n"), "\n")
+	if len(lines) != len(config.Keys) {
+		t.Fatalf("dump %q, want %d lines", out.String(), len(config.Keys))
+	}
+	for _, line := range lines {
+		if !strings.HasPrefix(line, "config set ") || len(line) > lineedit.MaxLine {
+			t.Errorf("dumped line %q (%d bytes, max %d)", line, len(line), lineedit.MaxLine)
+		}
+	}
+
+	// Replay the dump through the console's line editor on a device with a
+	// different configuration, including a sensor binding the source lacks.
+	dst, err := config.Parse(config.Default)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.Set(dst, "sensor.humidity", "3/3/3"); err != nil {
+		t.Fatal(err)
+	}
+	dstQueue := make(chan bus.Command, 1)
+	var dstStore fakeStore
+	cmds := Commands(dst, &dstStore, dstQueue)
+	ed := lineedit.Editor{Out: io.Discard}
+	for _, line := range lines {
+		var edited []byte
+		for _, b := range []byte(line + "\r") {
+			edited, _ = ed.Feed(b)
+		}
+		var w bytes.Buffer
+		Exec(cmds, string(edited), &w)
+		if !strings.HasSuffix(w.String(), "(saved)\n") {
+			t.Errorf("%q: %q", line, w.String())
+		}
+		<-dstQueue
+	}
+
+	if *dst != *src {
+		t.Errorf("replayed device %+v, want %+v", *dst, *src)
+	}
+	if want := config.Format(src); !bytes.Equal(dstStore.saved, want) {
+		t.Errorf("replayed ini %q, want %q", dstStore.saved, want)
 	}
 }

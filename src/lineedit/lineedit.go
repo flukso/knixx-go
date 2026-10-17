@@ -8,7 +8,9 @@ import (
 )
 
 const (
-	MaxLine    = 80
+	// MaxLine fits a config set line for a switch bound to the most group
+	// addresses, as printed by config dump.
+	MaxLine    = 128
 	HistoryLen = 8
 	// MaxPrompt is the longest prompt redrawn without allocating.
 	MaxPrompt = 16
