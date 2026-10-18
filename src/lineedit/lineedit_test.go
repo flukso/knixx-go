@@ -190,3 +190,17 @@ func TestRedrawSingleWrite(t *testing.T) {
 		t.Errorf("redraw allocates %.0f times per run", allocs)
 	}
 }
+
+func TestDiscard(t *testing.T) {
+	e, _ := newEditor()
+	feed(e, "first\r")
+	feed(e, "half\x1b[")
+	e.Discard()
+	if got := feed(e, "Anext\r"); len(got) != 1 || got[0] != "Anext" {
+		t.Errorf("lines %q", got)
+	}
+	feed(e, up+up)
+	if got := current(e); got != "first" {
+		t.Errorf("history lost: %q", got)
+	}
+}

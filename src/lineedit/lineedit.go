@@ -116,6 +116,12 @@ func (e *Editor) Feed(b byte) (line []byte, done bool) {
 	return nil, false
 }
 
+// Discard drops the line being typed and any partial escape sequence,
+// keeping the history. It readies the editor for input from a new terminal.
+func (e *Editor) Discard() {
+	e.n, e.browse, e.esc, e.lastCR = 0, 0, escNone, false
+}
+
 // enter records the current line in the history and hands it out.
 func (e *Editor) enter() []byte {
 	line := e.line[:e.n]

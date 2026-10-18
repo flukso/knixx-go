@@ -1,7 +1,8 @@
 // Package led drives the two status LEDs, a WS2812B string. One goroutine,
 // Run, owns the LEDs; the only way in is its channel of triggers. Each
-// trigger queues a mode, and the modes play one after another, each for its
-// length, unless a cancel trigger ends one early. LED2 is kept off.
+// trigger queues a mode of LED1, and the modes play one after another, each
+// for its length, unless a cancel trigger ends one early. LED2 shows the BLE
+// console, independently of LED1.
 package led
 
 import (
@@ -9,7 +10,7 @@ import (
 	"time"
 )
 
-// Mode is a pattern of LED1.
+// Mode is a pattern of LED1, or BLE on LED2.
 type Mode uint8
 
 const (
@@ -19,6 +20,9 @@ const (
 	Occupancy
 	// Error flashes 10 ms every 100 ms for 0.5 s.
 	Error
+	// BLE pulses LED2 for 50 ms each second until cancelled, while the
+	// console runs on BLE.
+	BLE
 	numModes
 )
 
@@ -33,15 +37,16 @@ type Trigger struct {
 // modes waiting to play.
 const QueueLen = 8
 
-// The colours of LED1, dimmed: full brightness is glaring.
+// The colours of the LEDs, dimmed: full brightness is glaring.
 var (
 	Yellow = color.RGBA{R: 0x20, G: 0x10}
 	Green  = color.RGBA{G: 0x20}
 	Red    = color.RGBA{R: 0x20}
+	Blue   = color.RGBA{B: 0x20}
 )
 
 // pattern lights the LED in colour for on at the start of every period,
-// until length has passed.
+// until length has passed; a zero length lasts until cancelled.
 type pattern struct {
 	colour             color.RGBA
 	on, period, length time.Duration
@@ -51,6 +56,19 @@ var patterns = [numModes]pattern{
 	Init:      {colour: Yellow, on: 100 * time.Millisecond, period: 200 * time.Millisecond, length: 10 * time.Second},
 	Occupancy: {colour: Green, on: 50 * time.Millisecond, period: 100 * time.Millisecond, length: 100 * time.Millisecond},
 	Error:     {colour: Red, on: 10 * time.Millisecond, period: 100 * time.Millisecond, length: 500 * time.Millisecond},
+	BLE:       {colour: Blue, on: 50 * time.Millisecond, period: time.Second},
+}
+
+// at returns the colour of pat at now, for a start at start, and the time
+// of its next change.
+func (pat pattern) at(start, now time.Time) (c color.RGBA, next time.Time) {
+	elapsed := now.Sub(start)
+	phase := elapsed % pat.period
+	cycle := start.Add(elapsed - phase)
+	if phase < pat.on {
+		return pat.colour, cycle.Add(pat.on)
+	}
+	return color.RGBA{}, cycle.Add(pat.period)
 }
 
 // Notify sends t on ch, or drops it when ch is full: the sender never
@@ -62,9 +80,13 @@ func Notify(ch chan<- Trigger, t Trigger) {
 	}
 }
 
-// Player sequences the modes. It does not read the clock: the caller passes
-// the time.
+// Player sequences the modes of LED1 and runs the BLE pulse of LED2. It does
+// not read the clock: the caller passes the time.
 type Player struct {
+	// ble records that LED2 pulses, since bleStart.
+	ble      bool
+	bleStart time.Time
+
 	playing bool
 	cur     Mode
 	start   time.Time
@@ -77,6 +99,14 @@ type Player struct {
 // queue full is dropped.
 func (p *Player) Apply(t Trigger, now time.Time) {
 	if t.Mode >= numModes {
+		return
+	}
+	if t.Mode == BLE {
+		if t.Cancel {
+			p.ble = false
+		} else if !p.ble {
+			p.ble, p.bleStart = true, now
+		}
 		return
 	}
 	p.settle(now)
@@ -95,26 +125,25 @@ func (p *Player) Apply(t Trigger, now time.Time) {
 	p.n++
 }
 
-// Frame returns the colour of LED1 at now and the time of its next change,
-// or busy false when no mode is left to play.
-func (p *Player) Frame(now time.Time) (led1 color.RGBA, next time.Time, busy bool) {
+// Frame returns the colours of LED1 and LED2 at now and the time of the next
+// change of either, or busy false when neither has anything to play.
+func (p *Player) Frame(now time.Time) (leds [2]color.RGBA, next time.Time, busy bool) {
 	p.settle(now)
-	if !p.playing {
-		return color.RGBA{}, time.Time{}, false
+	if p.playing {
+		pat := patterns[p.cur]
+		leds[0], next = pat.at(p.start, now)
+		if end := p.start.Add(pat.length); next.After(end) {
+			next = end
+		}
 	}
-	pat := patterns[p.cur]
-	elapsed := now.Sub(p.start)
-	phase := elapsed % pat.period
-	cycle := p.start.Add(elapsed - phase)
-	if phase < pat.on {
-		led1, next = pat.colour, cycle.Add(pat.on)
-	} else {
-		next = cycle.Add(pat.period)
+	if p.ble {
+		var next2 time.Time
+		leds[1], next2 = patterns[BLE].at(p.bleStart, now)
+		if !p.playing || next2.Before(next) {
+			next = next2
+		}
 	}
-	if end := p.start.Add(pat.length); next.After(end) {
-		next = end
-	}
-	return led1, next, true
+	return leds, next, p.playing || p.ble
 }
 
 // settle moves past the modes that ended by now. Each next mode starts when
@@ -161,7 +190,7 @@ type Strip interface {
 }
 
 // Run plays the triggers received on triggers on strip, whose first LED is
-// LED1 and second LED2. It writes the strip only when LED1 changes and,
+// LED1 and second LED2. It writes the strip only when a LED changes and,
 // without a mode to play, only waits for triggers. It returns once triggers
 // is closed.
 func Run(triggers <-chan Trigger, strip Strip) {
@@ -183,9 +212,9 @@ func Run(triggers <-chan Trigger, strip Strip) {
 
 	for {
 		now := time.Now()
-		led1, next, busy := p.Frame(now)
-		if led1 != leds[0] {
-			leds[0] = led1
+		cur, next, busy := p.Frame(now)
+		if cur != leds {
+			leds = cur
 			strip.WriteColors(leds[:])
 		}
 

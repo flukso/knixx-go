@@ -137,7 +137,7 @@ func sensorCmd() cli.Cmd {
 			if !reading.valid {
 				fmt.Fprintln(w, "no temperature and humidity reading yet")
 			} else {
-				fmt.Fprintf(w, "temperature %.2f °C, humidity %.2f %%RH at %d ms (%d s ago)\n",
+				fmt.Fprintf(w, "temperature %.2f C, humidity %.2f %%RH at %d ms (%d s ago)\n",
 					float32(reading.temperature)/1000, float32(reading.humidity)/100,
 					reading.at.Milliseconds(), int64((now-reading.at)/time.Second))
 			}

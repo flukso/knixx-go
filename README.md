@@ -32,14 +32,15 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
     the timeout.
   - Once the timeout passes without motion, *not occupied* is sent.
 - **Status LEDs.** Two WS2812B RGB LEDs show the device state. LED1 plays
-  the modes below one after another, in the order they were triggered. LED2
-  stays off.
+  its modes below one after another, in the order they were triggered. LED2
+  shows the BLE console, independently of LED1.
 
   | mode | LED1 | length | trigger |
   |---|---|---|---|
   | init | blinks yellow at 5 Hz | until the ToF's first start, at most 10 s | boot |
   | occupancy | one 50 ms green pulse, then 50 ms dark | 100 ms | each motion frame of the ToF |
   | error | 10 ms red flash every 100 ms | 0.5 s | any error the firmware reports |
+  | ble | LED2: 50 ms blue pulse every 1 s | until `nus off` or the idle timeout | `nus on` |
 
   The errors include:
   - a sensor that fails;
@@ -64,13 +65,26 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
   | `config [dump \| init \| get <key> \| set <key> <value>]` | see [Configuration](#configuration) |
   | `sensor` | the latest temperature, humidity and illuminance reading |
   | `tof` | the ToF state, settings, warnings, motion count and the per zone motion of the last motion frame |
+  | `nus [on\|off]` | show the BLE console state, move the console to BLE NUS or back to USB |
 
   Use `screen /dev/ttyACM0` or a similar terminal. `tinygo monitor` garbles
   pasted input.
+- **BLE console.** `nus on` moves the console from USB to the Nordic UART
+  Service (NUS) on BLE.
+  - The board advertises as `knixx`. Any NUS terminal can connect, such as
+    nRF Connect or Serial Bluetooth Terminal, one central at a time.
+  - LED2 pulses blue once a second while the console is on BLE.
+  - The banner shows on the first key. Output to the console, including bus
+    and sensor errors, then goes to BLE.
+  - `nus off`, typed over BLE, drops the connection, stops advertising and
+    moves the console back to USB.
+  - The console also goes back to USB after 300 s without a connected
+    central, counted from `nus on` or the last disconnect, and on reset,
+    since BLE is off at boot.
 - **Host tool.** `src/ftdi` runs the same shell and bus logic on a PC. It
   drives the NCN5121 through an FTDI USB-serial adapter and uses the ini
   file given by `-config`, `knixx.ini` by default. The `sensor` and `tof`
-  commands and the occupancy input exist only on the nRF.
+  commands, the BLE console and the occupancy input exist only on the nRF.
 
 ## Building and testing
 
@@ -117,6 +131,7 @@ All Go code lives in the `knixx` module in `src/`.
 | `tp1` | KNX TP1 telegram packing |
 | `ncn` | NCN5121 services: `TxData` framing and the `Parser` of its indications |
 | `lineedit` | the console's line editor |
+| `nus` | the BLE console transport: the receive `Ring` filled from the SoftDevice interrupt, the `Writer` that sends notifications of 20 bytes, the idle `Timer` |
 | `led` | the status LEDs: the `Trigger`s, the `Player` that queues and plays the modes, and `Run`, the goroutine that owns the LEDs |
 | `internal/sht2x` | SHT2x temperature and humidity sensor driver |
 | `internal/vcnl4040` | VCNL4040 ambient light sensor driver, single measurements |
@@ -183,10 +198,19 @@ All Go code lives in the `knixx` module in `src/`.
    - The modes are queued, up to 8, and play in order.
    - A cancel trigger ends the playing mode of its kind and drops the queued
      ones.
-   - The strip is written only when LED1 changes. Between modes the
+   - LED2 pulses blue while the console runs on BLE, from a `ble` trigger
+     until its cancel, alongside the LED1 queue.
+   - The strip is written only when a LED changes. Between modes the
      goroutine just waits for a trigger.
    - Errors reach it through `fail` in `nrf` and through `bus.OnError`.
-6. **`config set`** validates the value, hands the new configuration to
+6. **The console** runs on one port at a time, USB CDC or BLE NUS.
+   - `nus on` enables the SoftDevice the first time and registers the NUS
+     service, then starts advertising and switches the port.
+   - The SoftDevice delivers writes of the central in its SWI2 interrupt.
+     They only go into a ring that the console goroutine polls.
+   - `pollNUS` on the console goroutine follows connects and disconnects and
+     runs the idle timeout.
+7. **`config set`** validates the value, hands the new configuration to
    `bus.Run` as `CmdConfig`, saves `config.Format` of it and prints the
    result. `runToF` picks up its settings by polling the device.
 
@@ -287,6 +311,16 @@ is rejected. `-` unbinds an optional group: nothing is sent for it.
 - **Occupancy pulses.** The ToF interrupt is polled every 50 ms, so all
   pulses within one poll give a single LED pulse. Each pulse takes 100 ms, so
   fast motion frames fill the LED queue and the excess pulses are dropped.
+- **BLE console security.** NUS has no pairing: while it is on, anyone in
+  range can connect and use the console, including `config set`. Keep it on
+  only while needed.
+- **The SoftDevice stays enabled after `nus off`.** The radio is silent, but
+  the BLE stack keeps running idle until the next reset, because it cannot
+  be disabled. A failed `nus on` may need a reset before it can be retried.
+- **BLE console output.** Output is sent as notifications of 20 bytes.
+  Output is dropped while no central is subscribed, and when the link stays
+  congested for 1 s. Most phone terminal apps send a typed line at once,
+  which the line editor handles like typed keys.
 - **Size limits.**
   - `knixx.ini` must stay under 1024 bytes on the nRF.
   - A console line holds at most 128 characters, which fits
