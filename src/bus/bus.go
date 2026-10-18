@@ -37,6 +37,21 @@ var occupancyUnit = time.Second
 // Out receives everything Run prints.
 var Out io.Writer = os.Stdout
 
+// OnError, when set, is called for each error Run reports.
+var OnError func()
+
+// errorln prints an error on Out and reports it to OnError.
+func errorln(a ...any) {
+	fmt.Fprintln(Out, a...)
+	failed()
+}
+
+func failed() {
+	if OnError != nil {
+		OnError()
+	}
+}
+
 func dump(prefix string, buf []byte) {
 	if Sniff.Load() {
 		fmt.Fprintf(Out, "%s % x\n", prefix, buf)
@@ -196,7 +211,7 @@ func Run(d io.ReadWriter, dev *thunder.Device, cmds <-chan Command, done chan<- 
 			switch cmd.Kind {
 			case CmdSwitch:
 				if int(cmd.Switch) >= len(cur.Switches) {
-					fmt.Fprintln(Out, "bus: no switch", cmd.Switch)
+					errorln("bus: no switch", cmd.Switch)
 					continue
 				}
 				data := dpt.DPT_1001(cmd.On).Pack()
@@ -243,12 +258,17 @@ func Run(d io.ReadWriter, dev *thunder.Device, cmds <-chan Command, done chan<- 
 				switch {
 				case rx.gotCon:
 					awaiting = false
-					if !rx.conPositive && !Sniff.Load() {
-						fmt.Fprintln(Out, "  L_Data.con: negative for", cemi.GroupAddr(group))
+					switch {
+					case rx.conPositive:
+					case Sniff.Load():
+						// The sniffer has shown it already.
+						failed()
+					default:
+						errorln("  L_Data.con: negative for", cemi.GroupAddr(group))
 					}
 				case time.Now().After(deadline):
 					awaiting = false
-					fmt.Fprintln(Out, "  no L_Data.con for", cemi.GroupAddr(group))
+					errorln("  no L_Data.con for", cemi.GroupAddr(group))
 				}
 			}
 			timeout := time.Duration(cur.Occupancy.Timeout) * occupancyUnit
@@ -269,12 +289,12 @@ func send(d io.Writer, dev *thunder.Device, group uint16, data []byte) bool {
 	tg := dev.GroupWrite(group, data)
 	buf, err := tg.Pack()
 	if err != nil {
-		fmt.Fprintln(Out, err)
+		errorln(err)
 		return false
 	}
 	dump(">", buf)
 	if _, err := ncn.TxData(d, buf); err != nil {
-		fmt.Fprintln(Out, err)
+		errorln(err)
 		return false
 	}
 	return true
@@ -286,7 +306,7 @@ func stat(d io.ReadWriter, rx *receiver, input []byte) {
 	req := [...]byte{ncn.U_StateReq, ncn.U_SystemStatReq}
 	dump(">", req[:])
 	if _, err := d.Write(req[:]); err != nil {
-		fmt.Fprintln(Out, err)
+		errorln(err)
 		return
 	}
 
@@ -303,9 +323,9 @@ func stat(d io.ReadWriter, rx *receiver, input []byte) {
 		}
 	}
 	if !rx.gotState {
-		fmt.Fprintln(Out, "  no U_State.ind reply")
+		errorln("  no U_State.ind reply")
 	}
 	if !rx.gotSystemStat {
-		fmt.Fprintln(Out, "  no U_SystemStat.ind reply")
+		errorln("  no U_SystemStat.ind reply")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"knixx/ncn"
 	"knixx/thunder"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -94,6 +95,7 @@ func TestTransmit(t *testing.T) {
 	want := append(frames(t, dev, true, 0x0002, 0x0003, 0x0004, 0x0005), frames(t, dev, false, 0x0002)...)
 
 	defer Sniff.Store(false)
+	errs := countErrors(t)
 	for _, on := range []bool{true, false} {
 		Sniff.Store(on)
 		d := fakeDevice{confirm: true}
@@ -107,11 +109,23 @@ func TestTransmit(t *testing.T) {
 		if strings.Contains(got, "no L_Data.con") {
 			t.Errorf("sniff=%v: unexpected timeout: %q", on, got)
 		}
+		if n := errs.Load(); n != 0 {
+			t.Errorf("sniff=%v: OnError called %d times", on, n)
+		}
 	}
+}
+
+// countErrors counts the calls of OnError until the test ends.
+func countErrors(t *testing.T) *atomic.Int32 {
+	var n atomic.Int32
+	OnError = func() { n.Add(1) }
+	t.Cleanup(func() { OnError = nil })
+	return &n
 }
 
 func TestNoConfirmation(t *testing.T) {
 	Sniff.Store(false)
+	errs := countErrors(t)
 	prev := conTimeout
 	conTimeout = 30 * time.Millisecond
 	defer func() { conTimeout = prev }()
@@ -127,15 +141,26 @@ func TestNoConfirmation(t *testing.T) {
 			t.Errorf("output %q lacks %q", got, want)
 		}
 	}
+	if n := errs.Load(); n != 3 {
+		t.Errorf("OnError called %d times, want 3", n)
+	}
 }
 
 func TestNegativeConfirmation(t *testing.T) {
-	Sniff.Store(false)
+	defer Sniff.Store(false)
+	errs := countErrors(t)
 	dev := testDevice()
-	d := fakeDevice{rx: []byte{0x13, 0x0b}}
-	got := run(t, &d, dev, []Command{{Kind: CmdSwitch, Switch: 0, On: true}})
-	if !strings.Contains(got, "L_Data.con: negative for 0/0/2") {
-		t.Errorf("output %q", got)
+	for _, sniff := range []bool{false, true} {
+		Sniff.Store(sniff)
+		errs.Store(0)
+		d := fakeDevice{rx: []byte{0x13, 0x0b}}
+		got := run(t, &d, dev, []Command{{Kind: CmdSwitch, Switch: 0, On: true}})
+		if !strings.Contains(got, "negative") {
+			t.Errorf("sniff=%v: output %q", sniff, got)
+		}
+		if n := errs.Load(); n != 1 {
+			t.Errorf("sniff=%v: OnError called %d times, want 1", sniff, n)
+		}
 	}
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"knixx/config"
+	"knixx/led"
 	"knixx/thunder"
 	"machine"
 	"os"
@@ -105,6 +106,7 @@ func loadConfig(log io.Writer) *thunder.Device {
 		fmt.Fprintln(log, err)
 	}
 	fmt.Fprintln(log, "using the built-in default configuration")
+	signal(led.Error)
 	dev, err := config.Parse(config.Default)
 	if err != nil {
 		// The default is embedded and covered by tests; this cannot happen.

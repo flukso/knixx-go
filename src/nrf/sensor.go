@@ -69,7 +69,7 @@ func runSensor(cmds chan<- bus.Command) {
 func measureClimate(cmds chan<- bus.Command) {
 	if !sensorConfigured {
 		if err := sensor.Configure(); err != nil {
-			fmt.Fprintln(console, "sht20:", err)
+			fail("sht20:", err)
 			return
 		}
 		sensorConfigured = true
@@ -78,12 +78,12 @@ func measureClimate(cmds chan<- bus.Command) {
 	at := time.Since(boot)
 	t, err := sensor.ReadTemperature()
 	if err != nil {
-		fmt.Fprintln(console, "sht20: temperature:", err)
+		fail("sht20: temperature:", err)
 		return
 	}
 	h, err := sensor.ReadHumidity()
 	if err != nil {
-		fmt.Fprintln(console, "sht20: humidity:", err)
+		fail("sht20: humidity:", err)
 		return
 	}
 	reading.valid, reading.at, reading.temperature, reading.humidity = true, at, t, h
@@ -91,7 +91,7 @@ func measureClimate(cmds chan<- bus.Command) {
 	select {
 	case cmds <- bus.Command{Kind: bus.CmdSensor, Temperature: t, Humidity: h}:
 	default:
-		fmt.Fprintln(console, "tx queue full")
+		fail("tx queue full")
 	}
 }
 
@@ -101,7 +101,7 @@ func measureClimate(cmds chan<- bus.Command) {
 func measureLight(cmds chan<- bus.Command) {
 	if !lightConfigured {
 		if err := light.Configure(); err != nil {
-			fmt.Fprintln(console, "vcnl4040:", err)
+			fail("vcnl4040:", err)
 			return
 		}
 		lightConfigured = true
@@ -111,7 +111,7 @@ func measureLight(cmds chan<- bus.Command) {
 	lux10, err := light.ReadIlluminance()
 	if err != nil {
 		lightConfigured = false
-		fmt.Fprintln(console, "vcnl4040:", err)
+		fail("vcnl4040:", err)
 		return
 	}
 	reading.lightValid, reading.lightAt, reading.lux10 = true, at, lux10
@@ -119,7 +119,7 @@ func measureLight(cmds chan<- bus.Command) {
 	select {
 	case cmds <- bus.Command{Kind: bus.CmdLight, Illuminance: int32(lux10)}:
 	default:
-		fmt.Fprintln(console, "tx queue full")
+		fail("tx queue full")
 	}
 }
 

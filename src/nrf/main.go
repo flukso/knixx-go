@@ -8,17 +8,22 @@ import (
 	"io"
 	"knixx/bus"
 	"knixx/cli"
+	"knixx/led"
 	"machine"
 )
 
 const baud = 38400
 
 func main() {
+	startLEDs()
+	signal(led.Init)
+
 	var log bytes.Buffer
 	log.WriteString("=== knixx thunder ===\n")
 
 	machine.UART0.Configure(machine.UARTConfig{BaudRate: baud})
 	bus.Out = console
+	bus.OnError = func() { signal(led.Error) }
 
 	dev := loadConfig(&log)
 	configureI2C(&log)
@@ -42,5 +47,6 @@ func configureI2C(log io.Writer) {
 		Frequency: 400 * machine.KHz,
 	}); err != nil {
 		fmt.Fprintln(log, "i2c:", err)
+		signal(led.Error)
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"knixx/bus"
 	"knixx/cli"
 	"knixx/internal/vl53l7cx"
+	"knixx/led"
 	"knixx/thunder"
 	"machine"
 	"sync/atomic"
@@ -90,22 +91,29 @@ func runToF(dev *thunder.Device, cmds chan<- bus.Command) {
 	if err := tofInt.SetInterrupt(machine.PinFalling, func(machine.Pin) {
 		tofPulses.Add(1)
 	}); err != nil {
-		fmt.Fprintln(console, "vl53l7cx: interrupt:", err)
+		endInit()
+		fail("vl53l7cx: interrupt:", err)
 		return
 	}
 	tof = vl53l7cx.New(machine.I2C1)
 
-	for ; ; time.Sleep(tofRetry) {
+	for first := true; ; time.Sleep(tofRetry) {
 		s := settingsOf(dev, tofStatus.applied)
-		if err := startToF(s); err != nil {
+		err := startToF(s)
+		if first {
+			// The device has started once the sensor ranges or failed to.
+			first = false
+			endInit()
+		}
+		if err != nil {
 			tofStatus.err, tofStatus.ranging = err, false
-			fmt.Fprintln(console, "vl53l7cx:", err)
+			fail("vl53l7cx:", err)
 			continue
 		}
 		tofStatus.err, tofStatus.ranging, tofStatus.applied = nil, true, s
 		if err := watchToF(dev, cmds); err != nil {
 			tofStatus.err, tofStatus.ranging = err, false
-			fmt.Fprintln(console, "vl53l7cx:", err)
+			fail("vl53l7cx:", err)
 		}
 	}
 }
@@ -159,10 +167,11 @@ func watchToF(dev *thunder.Device, cmds chan<- bus.Command) error {
 			tofStatus.motions += n - seen
 			seen = n
 			tofStatus.lastMotion = time.Since(boot)
+			signal(led.Occupancy)
 			select {
 			case cmds <- bus.Command{Kind: bus.CmdMotion}:
 			default:
-				fmt.Fprintln(console, "tx queue full")
+				fail("tx queue full")
 			}
 			// The frame that raised INT, for the tof command.
 			if m, err := tof.Motion(); err == nil {

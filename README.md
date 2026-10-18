@@ -31,6 +31,21 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
   - The first motion sends DPT 1.018 *occupied*, and further motion restarts
     the timeout.
   - Once the timeout passes without motion, *not occupied* is sent.
+- **Status LEDs.** Two WS2812B RGB LEDs show the device state. LED1 plays
+  the modes below one after another, in the order they were triggered. LED2
+  stays off.
+
+  | mode | LED1 | length | trigger |
+  |---|---|---|---|
+  | init | blinks yellow at 5 Hz | until the ToF's first start, at most 10 s | boot |
+  | occupancy | one 50 ms green pulse, then 50 ms dark | 100 ms | each motion frame of the ToF |
+  | error | 10 ms red flash every 100 ms | 0.5 s | any error the firmware reports |
+
+  The errors include:
+  - a sensor that fails;
+  - a full tx queue;
+  - a telegram without a positive L_Data.con;
+  - a configuration that falls back to the built-in default.
 - **Configuration.** The settings are kept in `knixx.ini` on a littlefs on
   the Feather's external QSPI flash.
   - They are edited live from the console. A change is validated, applied
@@ -93,7 +108,7 @@ All Go code lives in the `knixx` module in `src/`.
 
 | package | role |
 |---|---|
-| `nrf` | firmware `main` (TinyGo only): pins, the console, the SHT20 and ToF goroutines, littlefs storage |
+| `nrf` | firmware `main` (TinyGo only): pins, the console, the sensor, ToF and LED goroutines, littlefs storage |
 | `ftdi` | host `main`: the shell on an FTDI-attached NCN5121 |
 | `bus` | `Run`, the loop that owns the transceiver; the `Command` kinds; the occupancy timer |
 | `cli` | the console commands shared by both mains, and `Exec` |
@@ -102,6 +117,7 @@ All Go code lives in the `knixx` module in `src/`.
 | `tp1` | KNX TP1 telegram packing |
 | `ncn` | NCN5121 services: `TxData` framing and the `Parser` of its indications |
 | `lineedit` | the console's line editor |
+| `led` | the status LEDs: the `Trigger`s, the `Player` that queues and plays the modes, and `Run`, the goroutine that owns the LEDs |
 | `internal/sht2x` | SHT2x temperature and humidity sensor driver |
 | `internal/vcnl4040` | VCNL4040 ambient light sensor driver, single measurements |
 | `internal/vl53l7cx` | Go port of ST's VL53L7CX ultra lite driver (ULD) 2.0.1 |
@@ -124,15 +140,18 @@ All Go code lives in the `knixx` module in `src/`.
  runSensor  (SHT20, VCNL4040, 60 s) ─┼─► cmds (16) ─► bus.Run ─► NCN5121 ─► KNX TP1
  runToF     (VL53L7CX INT pulses) ───┘                  ▲  UART0
                                                         └─ L_Data.con, indications
+
+ main (init), runToF (start, motion), errors ─► leds (8) ─► led.Run ─► WS2812B ×2
 ```
 
 1. **Boot** (`nrf/main.go`):
-   1. Configure UART0.
-   2. `loadConfig` mounts the littlefs and formats the flash if there is none.
-   3. It writes the built-in default when `knixx.ini` is missing, then parses
+   1. Start `led.Run` and trigger the init blink.
+   2. Configure UART0.
+   3. `loadConfig` mounts the littlefs and formats the flash if there is none.
+   4. It writes the built-in default when `knixx.ini` is missing, then parses
       it. On any failure it falls back to the built-in default.
-   4. Configure I2C1 at 400 kHz.
-   5. Start `bus.Run`, `runSensor` and `runToF`, then run the console.
+   5. Configure I2C1 at 400 kHz.
+   6. Start `bus.Run`, `runSensor` and `runToF`, then run the console.
 2. **`bus.Run`** is the only user of the transceiver and works on its own copy
    of the configuration.
    - It takes one command at a time from `cmds`. A command expands into
@@ -149,14 +168,25 @@ All Go code lives in the `knixx` module in `src/`.
    1. It resets the sensor's I2C interface.
    2. It boots the sensor, which includes the firmware upload of about 2 s.
    3. It programs the settings and starts ranging.
+   4. After this first start, whether it succeeds or fails, it cancels the
+      init blink.
 
    Then:
    - Every 50 ms it turns the INT pulses counted by the interrupt handler
-     into a `CmdMotion`.
+     into a `CmdMotion` and an occupancy pulse on LED1.
    - It applies setting changes by stopping, reprogramming and restarting
      ranging.
    - When the sensor fails, it reports the error and retries after 60 s.
-5. **`config set`** validates the value, hands the new configuration to
+5. **`led.Run`** owns the LEDs. Its channel of triggers is the only way in.
+   - Senders never block: a trigger sent while the channel is full is
+     dropped.
+   - The modes are queued, up to 8, and play in order.
+   - A cancel trigger ends the playing mode of its kind and drops the queued
+     ones.
+   - The strip is written only when LED1 changes. Between modes the
+     goroutine just waits for a trigger.
+   - Errors reach it through `fail` in `nrf` and through `bus.OnError`.
+6. **`config set`** validates the value, hands the new configuration to
    `bus.Run` as `CmdConfig`, saves `config.Format` of it and prints the
    result. `runToF` picks up its settings by polling the device.
 
@@ -252,6 +282,11 @@ is rejected. `-` unbinds an optional group: nothing is sent for it.
 - **Timeout.** The timeout restarts on every motion frame. A value shorter
   than the ranging period lets occupancy drop between frames during
   continuous motion.
+- **LED standby current.** A WS2812B draws roughly 0.5–1 mA even when dark,
+  so the two LEDs dominate the board's idle current.
+- **Occupancy pulses.** The ToF interrupt is polled every 50 ms, so all
+  pulses within one poll give a single LED pulse. Each pulse takes 100 ms, so
+  fast motion frames fill the LED queue and the excess pulses are dropped.
 - **Size limits.**
   - `knixx.ini` must stay under 1024 bytes on the nRF.
   - A console line holds at most 128 characters, which fits
@@ -285,6 +320,7 @@ config init                 restore and save the built-in default
 | NCN5121 | TX / RX | UART0 |
 | SHT20 (0x40), VL53L7CX (0x29) and VCNL4040 (0x60) | SDA / SCL | I2C1 (TWI1) |
 | VCNL4040 INT (PROX.INT), unused | A2 | P0.30 |
+| WS2812B data in, LED1 then LED2 | A3 | P0.28 |
 | VL53L7CX INT, open drain | SCK | P0.14 |
 | VL53L7CX LPn | MOSI | P0.13 |
 | VL53L7CX I2C_RST | MISO | P0.15 |
