@@ -212,7 +212,7 @@ func TestConfigDump(t *testing.T) {
 	for key, value := range map[string]string{
 		"device.individual": "15.15.255",
 		"A.group":           strings.Join(groups, ","),
-		"sensor.humidity":   "-",
+		"humidity.group":    "-",
 	} {
 		if err := config.Set(src, key, value); err != nil {
 			t.Fatal(err)
@@ -242,7 +242,7 @@ func TestConfigDump(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := config.Set(dst, "sensor.humidity", "3/3/3"); err != nil {
+	if err := config.Set(dst, "humidity.group", "3/3/3"); err != nil {
 		t.Fatal(err)
 	}
 	dstQueue := make(chan bus.Command, 1)
@@ -282,7 +282,7 @@ func TestConfigInit(t *testing.T) {
 	for key, value := range map[string]string{
 		"device.individual": "1.2.3",
 		"A.group":           "1/1/1,1/1/2",
-		"sensor.humidity":   "-",
+		"humidity.group":    "-",
 	} {
 		if err := config.Set(dev, key, value); err != nil {
 			t.Fatal(err)

@@ -197,6 +197,8 @@ func TestGroupLists(t *testing.T) {
 
 func TestSensor(t *testing.T) {
 	const noSensor = "[device]\nindividual = 7.8.1\n[A]\ngroup = 0/0/1\n[B]\ngroup = 0/0/2\n"
+	// noSensor2 is noSensor as Format writes it.
+	const noSensor2 = "[device]\nindividual = 7.8.1\n\n[A]\ngroup = 0/0/1\n\n[B]\ngroup = 0/0/2\n"
 	dev, err := Parse([]byte(noSensor))
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +206,7 @@ func TestSensor(t *testing.T) {
 	if dev.Sensor != (thunder.Sensor{}) {
 		t.Errorf("Sensor without a section = %+v, want unbound", dev.Sensor)
 	}
-	for _, key := range []string{"sensor.temperature", "sensor.humidity"} {
+	for _, key := range []string{"temperature.group", "humidity.group"} {
 		if v, _ := Get(dev, key); v != "-" {
 			t.Errorf("%s = %q, want -", key, v)
 		}
@@ -213,25 +215,34 @@ func TestSensor(t *testing.T) {
 		t.Errorf("Format without sensor = %q", got)
 	}
 
-	dev, err = Parse([]byte(noSensor + "[sensor]\nhumidity = 1/2/3\n"))
+	// The [sensor] section of earlier versions is ignored.
+	dev, err = Parse([]byte(noSensor + "[sensor]\ntemperature = 0/1/1\nhumidity = 0/1/2\n"))
+	if err != nil || dev.Sensor != (thunder.Sensor{}) {
+		t.Errorf("legacy [sensor]: %+v, %v", dev.Sensor, err)
+	}
+
+	dev, err = Parse([]byte(noSensor + "[humidity]\ngroup = 1/2/3\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := (thunder.Sensor{Humidity: uint16(cemi.NewGroupAddr3(1, 2, 3))}); dev.Sensor != want {
 		t.Errorf("Sensor = %+v, want %+v", dev.Sensor, want)
 	}
+	if got := string(Format(dev)); got != noSensor2+"\n[humidity]\ngroup = 1/2/3\n" {
+		t.Errorf("Format with humidity only = %q", got)
+	}
 
-	if err := Set(dev, "Sensor.Temperature", "0/1/1"); err != nil {
+	if err := Set(dev, "Temperature.Group", "0/1/1"); err != nil {
 		t.Fatal(err)
 	}
-	if v, _ := Get(dev, "sensor.temperature"); v != "0/1/1" {
-		t.Errorf("sensor.temperature = %q", v)
+	if v, _ := Get(dev, "temperature.group"); v != "0/1/1" {
+		t.Errorf("temperature.group = %q", v)
 	}
 	again, err := Parse(Format(dev))
 	if err != nil || *again != *dev {
 		t.Errorf("round trip: %+v, %v", again, err)
 	}
-	if err := Set(dev, "sensor.humidity", "-"); err != nil || dev.Sensor.Humidity != 0 {
+	if err := Set(dev, "humidity.group", "-"); err != nil || dev.Sensor.Humidity != 0 {
 		t.Errorf("unbind: %+v, %v", dev.Sensor, err)
 	}
 	again, err = Parse(Format(dev))
@@ -241,14 +252,14 @@ func TestSensor(t *testing.T) {
 
 	before := *dev
 	for _, value := range []string{"", "0/1/1, 0/1/2", "nope", "1.1.1", "0/0/0"} {
-		if err := Set(dev, "sensor.temperature", value); err == nil {
-			t.Errorf("Set(sensor.temperature, %q): expected an error", value)
+		if err := Set(dev, "temperature.group", value); err == nil {
+			t.Errorf("Set(temperature.group, %q): expected an error", value)
 		}
 	}
 	if *dev != before {
 		t.Errorf("failed Set modified the device: %+v", dev)
 	}
-	if _, err := Parse([]byte(noSensor + "[sensor]\ntemperature = nope\n")); err == nil {
+	if _, err := Parse([]byte(noSensor + "[temperature]\ngroup = nope\n")); err == nil {
 		t.Error("Parse with a bad sensor group: expected an error")
 	}
 }

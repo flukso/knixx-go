@@ -14,19 +14,18 @@ import (
 )
 
 const (
-	deviceSection    = "device"
-	individualKey    = "individual"
-	groupKey         = "group"
-	sensorSection    = "sensor"
-	temperatureKey   = "temperature"
-	humidityKey      = "humidity"
-	occupancySection = "occupancy"
-	timeoutKey       = "timeout"
-	thresholdKey     = "threshold"
-	frequencyKey     = "frequency"
-	integrationKey   = "integration"
-	minDistanceKey   = "min_distance"
-	maxDistanceKey   = "max_distance"
+	deviceSection      = "device"
+	individualKey      = "individual"
+	groupKey           = "group"
+	temperatureSection = "temperature"
+	humiditySection    = "humidity"
+	occupancySection   = "occupancy"
+	timeoutKey         = "timeout"
+	thresholdKey       = "threshold"
+	frequencyKey       = "frequency"
+	integrationKey     = "integration"
+	minDistanceKey     = "min_distance"
+	maxDistanceKey     = "max_distance"
 	// unbound is the value of an optional group address that is not set.
 	unbound = "-"
 )
@@ -79,21 +78,21 @@ func Parse(data []byte) (*thunder.Device, error) {
 		}
 	}
 
-	// The sensor section is optional so that files written before it existed
-	// still load; a missing key leaves the value unbound.
-	for _, k := range [...]struct {
-		key   string
-		group *uint16
+	// The sensor value sections are optional; a missing one leaves its
+	// value unbound.
+	for _, s := range [...]struct {
+		section string
+		group   *uint16
 	}{
-		{temperatureKey, &dev.Sensor.Temperature},
-		{humidityKey, &dev.Sensor.Humidity},
+		{temperatureSection, &dev.Sensor.Temperature},
+		{humiditySection, &dev.Sensor.Humidity},
 	} {
-		v, ok := ini.SectionGet(sensorSection, k.key)
+		v, ok := ini.SectionGet(s.section, groupKey)
 		if !ok {
 			continue
 		}
-		if err := parseOptionalGroup(v, k.group); err != nil {
-			return nil, fmt.Errorf("config: [%s] %s: %w", sensorSection, k.key, err)
+		if err := parseOptionalGroup(v, s.group); err != nil {
+			return nil, fmt.Errorf("config: [%s] %s: %w", s.section, groupKey, err)
 		}
 	}
 
@@ -198,7 +197,7 @@ func get(ini *goini.INI, section, key string) (string, error) {
 // Keys lists the parameters accessible through Get and Set, in file order.
 var Keys = [...]string{
 	"device.individual", "A.group", "B.group",
-	"sensor.temperature", "sensor.humidity",
+	"temperature.group", "humidity.group",
 	"occupancy.group", "occupancy.timeout", "occupancy.threshold",
 	"occupancy.frequency", "occupancy.integration",
 	"occupancy.min_distance", "occupancy.max_distance",
@@ -264,9 +263,9 @@ func field(dev *thunder.Device, key string) (ref, error) {
 	switch {
 	case strings.EqualFold(section, deviceSection) && strings.EqualFold(name, individualKey):
 		return ref{individual: &dev.Individual}, nil
-	case strings.EqualFold(section, sensorSection) && strings.EqualFold(name, temperatureKey):
+	case strings.EqualFold(section, temperatureSection) && strings.EqualFold(name, groupKey):
 		return ref{group: &dev.Sensor.Temperature}, nil
-	case strings.EqualFold(section, sensorSection) && strings.EqualFold(name, humidityKey):
+	case strings.EqualFold(section, humiditySection) && strings.EqualFold(name, groupKey):
 		return ref{group: &dev.Sensor.Humidity}, nil
 	case strings.EqualFold(section, occupancySection) && strings.EqualFold(name, groupKey):
 		return ref{group: &dev.Occupancy.Group}, nil
@@ -305,7 +304,7 @@ func Get(dev *thunder.Device, key string) (string, error) {
 }
 
 // Set parses value and assigns it to key. A switch's group key takes a
-// comma separated list; a sensor key and occupancy.group take a single group
+// comma separated list; temperature.group, humidity.group and occupancy.group take a single group
 // address, or "-" to unbind it; the other occupancy keys take a number within
 // their range; the distance window is not checked as a pair, see
 // thunder.Occupancy.DistanceValid. dev is left untouched when value is
@@ -328,14 +327,11 @@ func Format(dev *thunder.Device) []byte {
 	for _, sw := range dev.Switches {
 		fmt.Fprintf(&b, "\n[%s]\n%s = %s\n", sw.Name, groupKey, formatGroups(&sw))
 	}
-	if s := dev.Sensor; s.Temperature != 0 || s.Humidity != 0 {
-		fmt.Fprintf(&b, "\n[%s]\n", sensorSection)
-		if s.Temperature != 0 {
-			fmt.Fprintf(&b, "%s = %s\n", temperatureKey, cemi.GroupAddr(s.Temperature))
-		}
-		if s.Humidity != 0 {
-			fmt.Fprintf(&b, "%s = %s\n", humidityKey, cemi.GroupAddr(s.Humidity))
-		}
+	if g := dev.Sensor.Temperature; g != 0 {
+		fmt.Fprintf(&b, "\n[%s]\n%s = %s\n", temperatureSection, groupKey, cemi.GroupAddr(g))
+	}
+	if g := dev.Sensor.Humidity; g != 0 {
+		fmt.Fprintf(&b, "\n[%s]\n%s = %s\n", humiditySection, groupKey, cemi.GroupAddr(g))
 	}
 	// The occupancy section is left out while it holds nothing but the
 	// defaults of a file without it.
