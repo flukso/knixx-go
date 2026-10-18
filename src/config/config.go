@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"knixx/thunder"
+	"strconv"
 	"strings"
 
 	"github.com/vapourismo/knx-go/knx/cemi"
@@ -13,12 +14,19 @@ import (
 )
 
 const (
-	deviceSection  = "device"
-	individualKey  = "individual"
-	groupKey       = "group"
-	sensorSection  = "sensor"
-	temperatureKey = "temperature"
-	humidityKey    = "humidity"
+	deviceSection    = "device"
+	individualKey    = "individual"
+	groupKey         = "group"
+	sensorSection    = "sensor"
+	temperatureKey   = "temperature"
+	humidityKey      = "humidity"
+	occupancySection = "occupancy"
+	timeoutKey       = "timeout"
+	thresholdKey     = "threshold"
+	frequencyKey     = "frequency"
+	integrationKey   = "integration"
+	minDistanceKey   = "min_distance"
+	maxDistanceKey   = "max_distance"
 	// unbound is the value of an optional group address that is not set.
 	unbound = "-"
 )
@@ -31,7 +39,8 @@ var switchNames = [thunder.NumSwitches]string{"A", "B"}
 var Default []byte
 
 // Parse reads the device's individual address, the group addresses of each
-// switch and the optional sensor group addresses from ini file contents.
+// switch, the optional sensor group addresses and the optional occupancy
+// settings from ini file contents.
 func Parse(data []byte) (*thunder.Device, error) {
 	ini := goini.New()
 	ini.SetParseSection(true)
@@ -40,7 +49,14 @@ func Parse(data []byte) (*thunder.Device, error) {
 		return nil, fmt.Errorf("config: %w", err)
 	}
 
-	var dev thunder.Device
+	dev := thunder.Device{Occupancy: thunder.Occupancy{
+		Timeout:     thunder.DefaultOccupancyTimeout,
+		Threshold:   thunder.DefaultMotionThreshold,
+		Frequency:   thunder.DefaultRangingFrequency,
+		Integration: thunder.DefaultIntegrationTime,
+		MinDistance: thunder.DefaultMinDistance,
+		MaxDistance: thunder.DefaultMaxDistance,
+	}}
 
 	v, err := get(ini, deviceSection, individualKey)
 	if err != nil {
@@ -78,6 +94,20 @@ func Parse(data []byte) (*thunder.Device, error) {
 		}
 		if err := parseOptionalGroup(v, k.group); err != nil {
 			return nil, fmt.Errorf("config: [%s] %s: %w", sensorSection, k.key, err)
+		}
+	}
+
+	// The occupancy section is optional too; missing keys keep their
+	// defaults.
+	for _, key := range [...]string{groupKey, timeoutKey, thresholdKey, frequencyKey, integrationKey,
+		minDistanceKey, maxDistanceKey} {
+		v, ok := ini.SectionGet(occupancySection, key)
+		if !ok {
+			continue
+		}
+		r, _ := field(&dev, occupancySection+"."+key)
+		if err := r.set(v); err != nil {
+			return nil, fmt.Errorf("config: [%s] %s: %w", occupancySection, key, err)
 		}
 	}
 
@@ -169,6 +199,9 @@ func get(ini *goini.INI, section, key string) (string, error) {
 var Keys = [...]string{
 	"device.individual", "A.group", "B.group",
 	"sensor.temperature", "sensor.humidity",
+	"occupancy.group", "occupancy.timeout", "occupancy.threshold",
+	"occupancy.frequency", "occupancy.integration",
+	"occupancy.min_distance", "occupancy.max_distance",
 }
 
 // Store persists a configuration produced by Format.
@@ -176,12 +209,53 @@ type Store interface {
 	Save(data []byte) error
 }
 
-// ref points at the value a key refers to; exactly one field is non-nil.
+// ref points at the value a key refers to; exactly one of the pointers is
+// non-nil.
 type ref struct {
 	individual *uint16
 	sw         *thunder.Switch
 	// group is an optional single group address.
 	group *uint16
+	// number is a decimal number between min and max.
+	number   *uint16
+	min, max uint16
+}
+
+// set parses value into the referenced field, which is left untouched when
+// value is invalid.
+func (r ref) set(value string) error {
+	switch {
+	case r.individual != nil:
+		a, err := cemi.NewIndividualAddrString(value)
+		if err != nil {
+			return err
+		}
+		*r.individual = uint16(a)
+		return nil
+	case r.group != nil:
+		return parseOptionalGroup(value, r.group)
+	case r.number != nil:
+		n, err := strconv.ParseUint(strings.TrimSpace(value), 10, 16)
+		if err != nil || uint16(n) < r.min || uint16(n) > r.max {
+			return fmt.Errorf("%q is not a number from %d to %d", value, r.min, r.max)
+		}
+		*r.number = uint16(n)
+		return nil
+	}
+	return parseGroups(value, r.sw)
+}
+
+// get formats the referenced field.
+func (r ref) get() string {
+	switch {
+	case r.individual != nil:
+		return cemi.IndividualAddr(*r.individual).String()
+	case r.group != nil:
+		return formatOptionalGroup(*r.group)
+	case r.number != nil:
+		return strconv.FormatUint(uint64(*r.number), 10)
+	}
+	return formatGroups(r.sw)
 }
 
 // field resolves a "section.key" name to the value it refers to.
@@ -194,6 +268,26 @@ func field(dev *thunder.Device, key string) (ref, error) {
 		return ref{group: &dev.Sensor.Temperature}, nil
 	case strings.EqualFold(section, sensorSection) && strings.EqualFold(name, humidityKey):
 		return ref{group: &dev.Sensor.Humidity}, nil
+	case strings.EqualFold(section, occupancySection) && strings.EqualFold(name, groupKey):
+		return ref{group: &dev.Occupancy.Group}, nil
+	case strings.EqualFold(section, occupancySection) && strings.EqualFold(name, timeoutKey):
+		return ref{number: &dev.Occupancy.Timeout,
+			min: thunder.MinOccupancyTimeout, max: thunder.MaxOccupancyTimeout}, nil
+	case strings.EqualFold(section, occupancySection) && strings.EqualFold(name, thresholdKey):
+		return ref{number: &dev.Occupancy.Threshold,
+			min: thunder.MinMotionThreshold, max: thunder.MaxMotionThreshold}, nil
+	case strings.EqualFold(section, occupancySection) && strings.EqualFold(name, frequencyKey):
+		return ref{number: &dev.Occupancy.Frequency,
+			min: thunder.MinRangingFrequency, max: thunder.MaxRangingFrequency}, nil
+	case strings.EqualFold(section, occupancySection) && strings.EqualFold(name, integrationKey):
+		return ref{number: &dev.Occupancy.Integration,
+			min: thunder.MinIntegrationTime, max: thunder.MaxIntegrationTime}, nil
+	case strings.EqualFold(section, occupancySection) && strings.EqualFold(name, minDistanceKey):
+		return ref{number: &dev.Occupancy.MinDistance,
+			min: thunder.MinMotionDistance, max: thunder.MaxMotionDistance}, nil
+	case strings.EqualFold(section, occupancySection) && strings.EqualFold(name, maxDistanceKey):
+		return ref{number: &dev.Occupancy.MaxDistance,
+			min: thunder.MinMotionDistance, max: thunder.MaxMotionDistance}, nil
 	}
 	if sw := dev.Switch(section); sw != nil && strings.EqualFold(name, groupKey) {
 		return ref{sw: sw}, nil
@@ -207,35 +301,21 @@ func Get(dev *thunder.Device, key string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	switch {
-	case r.individual != nil:
-		return cemi.IndividualAddr(*r.individual).String(), nil
-	case r.group != nil:
-		return formatOptionalGroup(*r.group), nil
-	}
-	return formatGroups(r.sw), nil
+	return r.get(), nil
 }
 
 // Set parses value and assigns it to key. A switch's group key takes a
-// comma separated list; a sensor key takes a single group address, or "-"
-// to unbind it. dev is left untouched when value is invalid.
+// comma separated list; a sensor key and occupancy.group take a single group
+// address, or "-" to unbind it; the other occupancy keys take a number within
+// their range; the distance window is not checked as a pair, see
+// thunder.Occupancy.DistanceValid. dev is left untouched when value is
+// invalid.
 func Set(dev *thunder.Device, key, value string) error {
 	r, err := field(dev, key)
 	if err != nil {
 		return err
 	}
-	switch {
-	case r.individual != nil:
-		var a cemi.IndividualAddr
-		if a, err = cemi.NewIndividualAddrString(value); err == nil {
-			*r.individual = uint16(a)
-		}
-	case r.group != nil:
-		err = parseOptionalGroup(value, r.group)
-	default:
-		err = parseGroups(value, r.sw)
-	}
-	if err != nil {
+	if err := r.set(value); err != nil {
 		return fmt.Errorf("config: %s: %w", key, err)
 	}
 	return nil
@@ -256,6 +336,20 @@ func Format(dev *thunder.Device) []byte {
 		if s.Humidity != 0 {
 			fmt.Fprintf(&b, "%s = %s\n", humidityKey, cemi.GroupAddr(s.Humidity))
 		}
+	}
+	// The occupancy section is left out while it holds nothing but the
+	// defaults of a file without it.
+	if o := dev.Occupancy; o.Group != 0 || o.Timeout != thunder.DefaultOccupancyTimeout ||
+		o.Threshold != thunder.DefaultMotionThreshold || o.Frequency != thunder.DefaultRangingFrequency ||
+		o.Integration != thunder.DefaultIntegrationTime || o.MinDistance != thunder.DefaultMinDistance ||
+		o.MaxDistance != thunder.DefaultMaxDistance {
+		fmt.Fprintf(&b, "\n[%s]\n", occupancySection)
+		if o.Group != 0 {
+			fmt.Fprintf(&b, "%s = %s\n", groupKey, cemi.GroupAddr(o.Group))
+		}
+		fmt.Fprintf(&b, "%s = %d\n%s = %d\n%s = %d\n%s = %d\n", timeoutKey, o.Timeout,
+			thresholdKey, o.Threshold, frequencyKey, o.Frequency, integrationKey, o.Integration)
+		fmt.Fprintf(&b, "%s = %d\n%s = %d\n", minDistanceKey, o.MinDistance, maxDistanceKey, o.MaxDistance)
 	}
 	return b.Bytes()
 }

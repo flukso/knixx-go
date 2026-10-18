@@ -252,3 +252,101 @@ func TestSensor(t *testing.T) {
 		t.Errorf("unbound sensor sent % x", d.Bytes())
 	}
 }
+
+func TestOccupancyState(t *testing.T) {
+	var o occupancy
+	t0 := time.Unix(1000, 0)
+	const timeout = 60 * time.Second
+	steps := []struct {
+		motion bool
+		at     time.Duration
+		want   bool // turns on for motion, off otherwise
+	}{
+		{false, 0, false},                // nothing to expire
+		{true, 0, true},                  // first motion turns on
+		{true, 10 * time.Second, false},  // already on, restarts the timer
+		{false, 69 * time.Second, false}, // 59 s after the last motion
+		{false, 70 * time.Second, true},  // 60 s after the last motion
+		{false, 80 * time.Second, false}, // already off
+		{true, 90 * time.Second, true},   // on again
+	}
+	for i, s := range steps {
+		var got bool
+		if s.motion {
+			got = o.motion(t0.Add(s.at))
+		} else {
+			got = o.expire(t0.Add(s.at), timeout)
+		}
+		if got != s.want {
+			t.Errorf("step %d: got %v, want %v", i, got, s.want)
+		}
+	}
+}
+
+// runFor runs Run with the queued commands for at least d before closing
+// its command channel.
+func runFor(t *testing.T, d *fakeDevice, dev *thunder.Device, queued []Command, wait time.Duration) {
+	t.Helper()
+	prev := Out
+	Out = &bytes.Buffer{}
+	defer func() { Out = prev }()
+
+	cmds := make(chan Command, QueueLen)
+	done := make(chan struct{})
+	for _, cmd := range queued {
+		cmds <- cmd
+	}
+	go Run(d, dev, cmds, done)
+	time.Sleep(wait)
+	close(cmds)
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Run did not finish")
+	}
+}
+
+func TestOccupancy(t *testing.T) {
+	Sniff.Store(false)
+	prevUnit := occupancyUnit
+	occupancyUnit = 10 * time.Millisecond
+	defer func() { occupancyUnit = prevUnit }()
+
+	dev := testDevice()
+	dev.Occupancy = thunder.Occupancy{Group: 0x0201, Timeout: 10, Threshold: 44}
+	on := writes(t, dev, newWrite(0x0201, []byte{0x01}))
+	off := writes(t, dev, newWrite(0x0201, []byte{0x00}))
+	motion := Command{Kind: CmdMotion}
+
+	// Motion turns occupancy on once; it is turned off after 100 ms
+	// without motion.
+	d := fakeDevice{confirm: true}
+	runFor(t, &d, dev, []Command{motion, motion, motion}, 50*time.Millisecond)
+	if want := on; !bytes.Equal(d.Bytes(), want) {
+		t.Errorf("before the timeout: got % x, want % x", d.Bytes(), want)
+	}
+	if !Occupied.Load() {
+		t.Error("not occupied after motion")
+	}
+
+	d = fakeDevice{confirm: true}
+	runFor(t, &d, dev, []Command{motion, {Kind: CmdSwitch, Switch: 0, On: true}}, 300*time.Millisecond)
+	want := append(append(on, frames(t, dev, true, 0x0002)...), off...)
+	if !bytes.Equal(d.Bytes(), want) {
+		t.Errorf("after the timeout: got % x, want % x", d.Bytes(), want)
+	}
+	if d.overlap {
+		t.Error("a frame was sent before the previous L_Data.con")
+	}
+	if Occupied.Load() {
+		t.Error("still occupied after the timeout")
+	}
+
+	// Without a group, motion is ignored.
+	dev.Occupancy.Group = 0
+	d = fakeDevice{confirm: true}
+	runFor(t, &d, dev, []Command{motion}, 50*time.Millisecond)
+	if d.Len() != 0 {
+		t.Errorf("unbound occupancy sent % x", d.Bytes())
+	}
+}

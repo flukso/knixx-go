@@ -252,3 +252,109 @@ func TestSensor(t *testing.T) {
 		t.Error("Parse with a bad sensor group: expected an error")
 	}
 }
+
+func TestOccupancy(t *testing.T) {
+	const base = "[device]\nindividual = 7.8.1\n[A]\ngroup = 0/0/1\n[B]\ngroup = 0/0/2\n"
+	dev, err := Parse([]byte(base))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defaults := thunder.Occupancy{
+		Timeout:     thunder.DefaultOccupancyTimeout,
+		Threshold:   thunder.DefaultMotionThreshold,
+		Frequency:   thunder.DefaultRangingFrequency,
+		Integration: thunder.DefaultIntegrationTime,
+		MinDistance: thunder.DefaultMinDistance,
+		MaxDistance: thunder.DefaultMaxDistance,
+	}
+	if dev.Occupancy != defaults {
+		t.Errorf("Occupancy without a section = %+v, want %+v", dev.Occupancy, defaults)
+	}
+	if got := string(Format(dev)); got != "[device]\nindividual = 7.8.1\n\n[A]\ngroup = 0/0/1\n\n[B]\ngroup = 0/0/2\n" {
+		t.Errorf("Format with default occupancy = %q", got)
+	}
+
+	def, err := Parse(Default)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := thunder.Occupancy{Group: uint16(cemi.NewGroupAddr3(0, 2, 1)), Timeout: 60, Threshold: 44,
+		Frequency: 1, Integration: 5, MinDistance: 400, MaxDistance: 1500}
+	if def.Occupancy != want {
+		t.Errorf("default Occupancy = %+v, want %+v", def.Occupancy, want)
+	}
+
+	for key, value := range map[string]string{
+		"occupancy.group":        "1/2/3",
+		"Occupancy.Timeout":      "65535",
+		"occupancy.threshold":    "32767",
+		"occupancy.frequency":    "60",
+		"occupancy.integration":  "1000",
+		"occupancy.min_distance": "4000",
+		"occupancy.max_distance": "400",
+	} {
+		if err := Set(dev, key, value); err != nil {
+			t.Fatalf("Set(%s, %s): %v", key, value, err)
+		}
+		if got, _ := Get(dev, key); got != value {
+			t.Errorf("Get(%s) = %q, want %q", key, got, value)
+		}
+	}
+	again, err := Parse(Format(dev))
+	if err != nil || *again != *dev {
+		t.Errorf("round trip: %+v, %v", again, err)
+	}
+	if err := Set(dev, "occupancy.group", "-"); err != nil || dev.Occupancy.Group != 0 {
+		t.Errorf("unbind: %+v, %v", dev.Occupancy, err)
+	}
+	again, err = Parse(Format(dev))
+	if err != nil || *again != *dev {
+		t.Errorf("round trip after unbind: %+v, %v", again, err)
+	}
+
+	before := *dev
+	for key, values := range map[string][]string{
+		"occupancy.timeout":      {"0", "65536", "-1", "1.5", "", "sixty"},
+		"occupancy.threshold":    {"0", "32768", "-44", "nope"},
+		"occupancy.group":        {"0/0/0", "0/2/1, 0/2/2", "nope"},
+		"occupancy.frequency":    {"0", "61", "-1", "ten"},
+		"occupancy.integration":  {"1", "1001", "5ms"},
+		"occupancy.min_distance": {"399", "4001", "far"},
+		"occupancy.max_distance": {"0", "4001", "1.5m"},
+	} {
+		for _, value := range values {
+			if err := Set(dev, key, value); err == nil {
+				t.Errorf("Set(%s, %q): expected an error", key, value)
+			}
+		}
+	}
+	if *dev != before {
+		t.Errorf("failed Set modified the device: %+v", dev)
+	}
+	for _, section := range []string{"timeout = 0\n", "threshold = 40000\n", "group = x\n",
+		"frequency = 61\n", "integration = 1\n", "min_distance = 399\n", "max_distance = 4001\n"} {
+		if _, err := Parse([]byte(base + "[occupancy]\n" + section)); err == nil {
+			t.Errorf("Parse with %q: expected an error", section)
+		}
+	}
+	for _, value := range []string{"1", " 60 "} {
+		if err := Set(dev, "occupancy.timeout", value); err != nil {
+			t.Errorf("Set(occupancy.timeout, %q): %v", value, err)
+		}
+	}
+
+	// The window is not checked as a pair: an inverted one, as set above,
+	// survives a round trip.
+	if o := again.Occupancy; o.MinDistance != 4000 || o.MaxDistance != 400 {
+		t.Errorf("inverted window after round trip: %+v", o)
+	}
+
+	// A section written before the ranging keys existed keeps their defaults.
+	old, err := Parse([]byte(base + "[occupancy]\ngroup = 0/2/1\ntimeout = 60\nthreshold = 44\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if old.Occupancy != want {
+		t.Errorf("Occupancy without ranging keys = %+v, want %+v", old.Occupancy, want)
+	}
+}

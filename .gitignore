@@ -1,1 +1,4 @@
 /build/
+# ST's ULD download: only the driver sources are kept
+/src/internal/vl53l7cx/STSW-IMG036.zip
+/src/internal/vl53l7cx/VL53L7CX_ULD_driver_2.0.1/CubeIDE_F401RE_Example/

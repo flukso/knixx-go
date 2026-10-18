@@ -1,5 +1,6 @@
 // Package thunder models the knixx thunder board: its individual address, its
-// switches and its sensor, and builds the telegrams they send.
+// switches, its sensors and the occupancy they detect, and builds the
+// telegrams they send.
 package thunder
 
 import (
@@ -42,10 +43,73 @@ type Sensor struct {
 	Humidity    uint16
 }
 
+// Occupancy configures the occupancy derived from the motion indicator of
+// the time-of-flight sensor.
+type Occupancy struct {
+	// Group receives DPT 1.018 occupancy telegrams. 0 leaves it unbound.
+	Group uint16
+	// Timeout is the time in seconds without motion after which occupancy
+	// is turned off.
+	Timeout uint16
+	// Threshold is the motion intensity above which a zone detects motion.
+	Threshold uint16
+	// Frequency is the ranging frequency in Hz of the sensor's autonomous
+	// mode, at resolution 4x4.
+	Frequency uint16
+	// Integration is the integration time in ms of each frame.
+	Integration uint16
+	// MinDistance and MaxDistance bound in mm the distance window in which
+	// the sensor detects motion, see DistanceValid.
+	MinDistance, MaxDistance uint16
+}
+
+// Occupancy defaults and limits.
+const (
+	DefaultOccupancyTimeout = 60
+	MinOccupancyTimeout     = 1
+	MaxOccupancyTimeout     = 65535
+	DefaultMotionThreshold  = 44
+	MinMotionThreshold      = 1
+	// MaxMotionThreshold is the largest threshold the sensor can store.
+	MaxMotionThreshold      = 32767
+	DefaultRangingFrequency = 1
+	MinRangingFrequency     = 1
+	// MaxRangingFrequency is the limit of resolution 4x4.
+	MaxRangingFrequency    = 60
+	DefaultIntegrationTime = 5
+	MinIntegrationTime     = 2
+	MaxIntegrationTime     = 1000
+	DefaultMinDistance     = 400
+	DefaultMaxDistance     = 1500
+	// MinMotionDistance and MaxMotionDistance bound each distance;
+	// MaxMotionSpan bounds the width of the window.
+	MinMotionDistance = 400
+	MaxMotionDistance = 4000
+	MaxMotionSpan     = 1500
+)
+
+// DistanceValid reports whether the sensor accepts the distance window: on
+// top of the limits of each distance, MaxDistance must exceed MinDistance by
+// at most MaxMotionSpan. It mirrors vl53l7cx.ValidMotionDistance.
+func (o Occupancy) DistanceValid() bool {
+	return o.MinDistance >= MinMotionDistance && o.MaxDistance <= MaxMotionDistance &&
+		o.MaxDistance > o.MinDistance && o.MaxDistance-o.MinDistance <= MaxMotionSpan
+}
+
+// PeriodStretched reports whether the integration time plus the sensor's
+// 1 ms overhead does not fit the ranging period, in which case the sensor
+// lengthens the period to fit and ranges below Frequency.
+func (o Occupancy) PeriodStretched() bool {
+	// (Integration + 1) ms >= 1000/Frequency ms, without the rounding of
+	// the division.
+	return (uint32(o.Integration)+1)*uint32(o.Frequency) >= 1000
+}
+
 type Device struct {
 	Individual uint16
 	Switches   [NumSwitches]Switch
 	Sensor     Sensor
+	Occupancy  Occupancy
 }
 
 // Switch looks up a switch by its case-insensitive name. It returns nil when

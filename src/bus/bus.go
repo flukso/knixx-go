@@ -28,6 +28,12 @@ var conTimeout = 500 * time.Millisecond
 // Sniff enables the hex dump of the bytes exchanged with the transceiver.
 var Sniff atomic.Bool
 
+// Occupied reports the occupancy that Run last published.
+var Occupied atomic.Bool
+
+// occupancyUnit is the unit of thunder.Occupancy.Timeout.
+var occupancyUnit = time.Second
+
 // Out receives everything Run prints.
 var Out io.Writer = os.Stdout
 
@@ -44,6 +50,8 @@ const (
 	CmdStat
 	CmdConfig
 	CmdSensor
+	// CmdMotion reports motion seen by the time-of-flight sensor.
+	CmdMotion
 )
 
 type Command struct {
@@ -68,6 +76,33 @@ type write struct {
 
 // maxData fits the packed values sent: DPT 1 and DPT 9.
 const maxData = 3
+
+// occupancy turns motion into occupancy: it is on from the first motion
+// until a timeout passed without motion.
+type occupancy struct {
+	on   bool
+	last time.Time
+}
+
+// motion records motion at now and reports whether occupancy turns on.
+func (o *occupancy) motion(now time.Time) bool {
+	o.last = now
+	if o.on {
+		return false
+	}
+	o.on = true
+	return true
+}
+
+// expire reports whether occupancy turns off at now, timeout after the last
+// motion.
+func (o *occupancy) expire(now time.Time, timeout time.Duration) bool {
+	if !o.on || now.Sub(o.last) < timeout {
+		return false
+	}
+	o.on = false
+	return true
+}
 
 func newWrite(group uint16, data []byte) write {
 	w := write{group: group}
@@ -110,7 +145,10 @@ func (r *receiver) handle(data []byte) {
 // transceiver returns in between. A switch command sends one telegram per
 // bound group and a sensor command one per bound value, each after the
 // previous one was confirmed by L_Data.con or timed out; further commands
-// wait until all telegrams are done. Run is the only
+// wait until all telegrams are done. Motion turns occupancy on, and the
+// occupancy is turned off again once the configured timeout passed without
+// motion; both are published as DPT 1.018 to the occupancy group, if it is
+// bound. Run is the only
 // user of d while it runs, and works on its own copy of dev, which CmdConfig
 // replaces. It returns once cmds is closed and drained, closing done.
 func Run(d io.ReadWriter, dev *thunder.Device, cmds <-chan Command, done chan<- struct{}) {
@@ -125,6 +163,7 @@ func Run(d io.ReadWriter, dev *thunder.Device, cmds <-chan Command, done chan<- 
 	var awaiting bool
 	var group uint16
 	var deadline time.Time
+	var occ occupancy
 
 	defer close(done)
 	ticker := time.NewTicker(rxPoll)
@@ -172,6 +211,14 @@ func Run(d io.ReadWriter, dev *thunder.Device, cmds <-chan Command, done chan<- 
 					queue[nq] = newWrite(g, dpt.DPT_9007(float32(cmd.Humidity)/100).Pack())
 					nq++
 				}
+			case CmdMotion:
+				g := cur.Occupancy.Group
+				if g == 0 || !occ.motion(time.Now()) {
+					continue
+				}
+				Occupied.Store(true)
+				queue[0] = newWrite(g, dpt.DPT_1018(true).Pack())
+				nq, next = 1, 0
 			case CmdStat:
 				stat(d, &rx, input[:])
 			case CmdConfig:
@@ -181,18 +228,25 @@ func Run(d io.ReadWriter, dev *thunder.Device, cmds <-chan Command, done chan<- 
 			if n, _ := d.Read(input[:]); n > 0 {
 				rx.handle(input[:n])
 			}
-			if !awaiting {
-				continue
-			}
-			switch {
-			case rx.gotCon:
-				awaiting = false
-				if !rx.conPositive && !Sniff.Load() {
-					fmt.Fprintln(Out, "  L_Data.con: negative for", cemi.GroupAddr(group))
+			if awaiting {
+				switch {
+				case rx.gotCon:
+					awaiting = false
+					if !rx.conPositive && !Sniff.Load() {
+						fmt.Fprintln(Out, "  L_Data.con: negative for", cemi.GroupAddr(group))
+					}
+				case time.Now().After(deadline):
+					awaiting = false
+					fmt.Fprintln(Out, "  no L_Data.con for", cemi.GroupAddr(group))
 				}
-			case time.Now().After(deadline):
-				awaiting = false
-				fmt.Fprintln(Out, "  no L_Data.con for", cemi.GroupAddr(group))
+			}
+			timeout := time.Duration(cur.Occupancy.Timeout) * occupancyUnit
+			if next >= nq && !awaiting && occ.expire(time.Now(), timeout) {
+				Occupied.Store(false)
+				if g := cur.Occupancy.Group; g != 0 {
+					queue[0] = newWrite(g, dpt.DPT_1018(false).Pack())
+					nq, next = 1, 0
+				}
 			}
 		}
 	}

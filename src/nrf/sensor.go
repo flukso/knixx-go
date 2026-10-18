@@ -34,22 +34,13 @@ var (
 	}
 )
 
-// runSensor reads the SHT20 every sensorInterval and queues the reading on
-// cmds for publication on the bus.
+// runSensor reads the SHT20 on I2C1, see configureI2C, every sensorInterval
+// and queues the reading on cmds for publication on the bus.
 //
 // The readings follow a time.Ticker, which TinyGo re-arms at an absolute
 // deadline (when += period): the measurement time and any delay in handling
 // a tick do not accumulate, so the readings stay sensorInterval apart.
 func runSensor(cmds chan<- bus.Command) {
-	// I2C0 shares its peripheral instance with SPI0, which drives the flash.
-	if err := machine.I2C1.Configure(machine.I2CConfig{
-		SDA:       machine.SDA_PIN,
-		SCL:       machine.SCL_PIN,
-		Frequency: 100 * machine.KHz,
-	}); err != nil {
-		fmt.Fprintln(console, "i2c:", err)
-		return
-	}
 	sensor = sht2x.New(machine.I2C1)
 
 	time.Sleep(sensorFirst)

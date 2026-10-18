@@ -90,3 +90,45 @@ func TestNewSwitch(t *testing.T) {
 		t.Errorf("NGroups = %d, want %d", sw.NGroups, MaxGroups)
 	}
 }
+
+func TestPeriodStretched(t *testing.T) {
+	for _, c := range []struct {
+		hz, ms uint16
+		want   bool
+	}{
+		{1, 5, false},
+		{60, 15, false},
+		{60, 16, true},
+		{10, 99, true},
+		{10, 98, false},
+		{2, 400, false},
+		{1, 1000, true},
+	} {
+		o := Occupancy{Frequency: c.hz, Integration: c.ms}
+		if got := o.PeriodStretched(); got != c.want {
+			t.Errorf("%d Hz, %d ms: PeriodStretched() = %v, want %v", c.hz, c.ms, got, c.want)
+		}
+	}
+}
+
+// The same table as distancePairs in internal/vl53l7cx.
+func TestDistanceValid(t *testing.T) {
+	for _, c := range []struct {
+		min, max uint16
+		valid    bool
+	}{
+		{400, 1500, true},
+		{400, 1900, true},
+		{2500, 4000, true},
+		{399, 1000, false},
+		{1000, 4001, false},
+		{1000, 2501, false},
+		{1500, 1500, false},
+		{1500, 1000, false},
+	} {
+		o := Occupancy{MinDistance: c.min, MaxDistance: c.max}
+		if got := o.DistanceValid(); got != c.valid {
+			t.Errorf("%d-%d mm: DistanceValid() = %v, want %v", c.min, c.max, got, c.valid)
+		}
+	}
+}
