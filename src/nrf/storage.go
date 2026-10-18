@@ -10,6 +10,7 @@ import (
 	"knixx/thunder"
 	"machine"
 	"os"
+	"time"
 
 	"tinygo.org/x/drivers/flash"
 	"tinygo.org/x/tinyfs/littlefs"
@@ -25,13 +26,68 @@ var (
 		machine.P0_19, // SCK
 		machine.P0_20, // CS
 	)
-	filesystem = littlefs.New(blockDevice)
+	filesystem = littlefs.New(sectorFlash{blockDevice})
 
 	configBuf [1024]byte
 
 	// mounted records that the littlefs is usable for saving.
 	mounted bool
 )
+
+// sectorFlash fixes the erase of flash.Device (tinygo.org/x/drivers v0.36.0)
+// for littlefs. littlefs uses EraseBlockSize, the 4 KiB sector, as its block
+// size, but EraseBlocks erases a 64 KiB block at block × 64 KiB: it wiped
+// 16 times the requested area at the wrong address, corrupting the
+// filesystem. The driver also busy-waits for the erase to complete, without
+// yielding, freezing every goroutine for up to seconds.
+//
+// EraseBlocks here erases sectors and waits for each erase while yielding,
+// so the driver's own busy-wait before the next operation finds the flash
+// ready.
+type sectorFlash struct {
+	*flash.Device
+}
+
+const (
+	// flashBusy masks the WIP (write in progress) and WEL (write enable
+	// latch) bits of status register 1, as the driver does.
+	flashBusy = 0x03
+	// eraseTimeout bounds a sector erase, which takes tens of ms typically
+	// and some hundreds at most.
+	eraseTimeout = 2 * time.Second
+	erasePoll    = time.Millisecond
+)
+
+func (f sectorFlash) EraseBlocks(start, n int64) error {
+	for i := start; i < start+n; i++ {
+		if err := f.EraseSector(uint32(i)); err != nil {
+			return err
+		}
+		if err := f.waitReady(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// waitReady waits for the flash to finish an erase, letting the other
+// goroutines run meanwhile.
+func (f sectorFlash) waitReady() error {
+	start := time.Now()
+	for {
+		s, err := f.ReadStatus()
+		if err != nil {
+			return err
+		}
+		if s&flashBusy == 0 {
+			return nil
+		}
+		if time.Since(start) > eraseTimeout {
+			return flash.ErrWaitExpired
+		}
+		time.Sleep(erasePoll)
+	}
+}
 
 // loadConfig mounts the littlefs on the external flash, formatting it and
 // writing the default configuration when there is none, and parses
