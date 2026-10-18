@@ -11,16 +11,22 @@ STAMP          := $(TINYGOROOT)/.knixx-patched
 TARGET   := feather-nrf52840
 FIRMWARE := build/knixx.uf2
 
+# The goroutine stack size. TinyGo cannot size the stacks automatically for
+# this firmware (its call graph reaches the runtime's recursive panic path),
+# so they would fall back to the target's 2 KiB, too little for the console
+# and fmt; a goroutine stack overflow followed. Stacks come from the heap.
+STACK_SIZE := 8KB
+
 export TINYGOROOT
 
 .PHONY: nrf flash test tinygo-root clean
 
 nrf: $(STAMP)
 	@mkdir -p build
-	cd src && tinygo build -target=$(TARGET) -size short -o ../$(FIRMWARE) ./nrf
+	cd src && tinygo build -target=$(TARGET) -stack-size=$(STACK_SIZE) -size short -o ../$(FIRMWARE) ./nrf
 
 flash: $(STAMP)
-	cd src && tinygo flash -target=$(TARGET) ./nrf
+	cd src && tinygo flash -target=$(TARGET) -stack-size=$(STACK_SIZE) ./nrf
 
 test:
 	cd src && go vet ./... && go test ./...
