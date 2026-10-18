@@ -206,13 +206,31 @@ func TestSensor(t *testing.T) {
 	if dev.Sensor != (thunder.Sensor{}) {
 		t.Errorf("Sensor without a section = %+v, want unbound", dev.Sensor)
 	}
-	for _, key := range []string{"temperature.group", "humidity.group"} {
+	for _, key := range []string{"temperature.group", "humidity.group", "illuminance.group"} {
 		if v, _ := Get(dev, key); v != "-" {
 			t.Errorf("%s = %q, want -", key, v)
 		}
 	}
 	if got := string(Format(dev)); got != "[device]\nindividual = 7.8.1\n\n[A]\ngroup = 0/0/1\n\n[B]\ngroup = 0/0/2\n" {
 		t.Errorf("Format without sensor = %q", got)
+	}
+
+	if err := Set(dev, "illuminance.group", "0/1/3"); err != nil || dev.Sensor.Illuminance != uint16(cemi.NewGroupAddr3(0, 1, 3)) {
+		t.Errorf("Set(illuminance.group): %+v, %v", dev.Sensor, err)
+	}
+	if got := string(Format(dev)); got != noSensor2+"\n[illuminance]\ngroup = 0/1/3\n" {
+		t.Errorf("Format with illuminance only = %q", got)
+	}
+	if again, err := Parse(Format(dev)); err != nil || *again != *dev {
+		t.Errorf("illuminance round trip: %+v, %v", again, err)
+	}
+	for _, value := range []string{"", "0/1/3, 0/1/4", "0/0/0", "lux"} {
+		if err := Set(dev, "illuminance.group", value); err == nil {
+			t.Errorf("Set(illuminance.group, %q): expected an error", value)
+		}
+	}
+	if err := Set(dev, "illuminance.group", "-"); err != nil || dev.Sensor.Illuminance != 0 {
+		t.Errorf("unbind illuminance: %+v, %v", dev.Sensor, err)
 	}
 
 	// The [sensor] section of earlier versions is ignored.

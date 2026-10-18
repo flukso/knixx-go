@@ -19,6 +19,7 @@ const (
 	groupKey           = "group"
 	temperatureSection = "temperature"
 	humiditySection    = "humidity"
+	illuminanceSection = "illuminance"
 	occupancySection   = "occupancy"
 	timeoutKey         = "timeout"
 	thresholdKey       = "threshold"
@@ -86,6 +87,7 @@ func Parse(data []byte) (*thunder.Device, error) {
 	}{
 		{temperatureSection, &dev.Sensor.Temperature},
 		{humiditySection, &dev.Sensor.Humidity},
+		{illuminanceSection, &dev.Sensor.Illuminance},
 	} {
 		v, ok := ini.SectionGet(s.section, groupKey)
 		if !ok {
@@ -197,7 +199,7 @@ func get(ini *goini.INI, section, key string) (string, error) {
 // Keys lists the parameters accessible through Get and Set, in file order.
 var Keys = [...]string{
 	"device.individual", "A.group", "B.group",
-	"temperature.group", "humidity.group",
+	"temperature.group", "humidity.group", "illuminance.group",
 	"occupancy.group", "occupancy.timeout", "occupancy.threshold",
 	"occupancy.frequency", "occupancy.integration",
 	"occupancy.min_distance", "occupancy.max_distance",
@@ -267,6 +269,8 @@ func field(dev *thunder.Device, key string) (ref, error) {
 		return ref{group: &dev.Sensor.Temperature}, nil
 	case strings.EqualFold(section, humiditySection) && strings.EqualFold(name, groupKey):
 		return ref{group: &dev.Sensor.Humidity}, nil
+	case strings.EqualFold(section, illuminanceSection) && strings.EqualFold(name, groupKey):
+		return ref{group: &dev.Sensor.Illuminance}, nil
 	case strings.EqualFold(section, occupancySection) && strings.EqualFold(name, groupKey):
 		return ref{group: &dev.Occupancy.Group}, nil
 	case strings.EqualFold(section, occupancySection) && strings.EqualFold(name, timeoutKey):
@@ -304,7 +308,8 @@ func Get(dev *thunder.Device, key string) (string, error) {
 }
 
 // Set parses value and assigns it to key. A switch's group key takes a
-// comma separated list; temperature.group, humidity.group and occupancy.group take a single group
+// comma separated list; temperature.group, humidity.group, illuminance.group and occupancy.group
+// take a single group
 // address, or "-" to unbind it; the other occupancy keys take a number within
 // their range; the distance window is not checked as a pair, see
 // thunder.Occupancy.DistanceValid. dev is left untouched when value is
@@ -332,6 +337,9 @@ func Format(dev *thunder.Device) []byte {
 	}
 	if g := dev.Sensor.Humidity; g != 0 {
 		fmt.Fprintf(&b, "\n[%s]\n%s = %s\n", humiditySection, groupKey, cemi.GroupAddr(g))
+	}
+	if g := dev.Sensor.Illuminance; g != 0 {
+		fmt.Fprintf(&b, "\n[%s]\n%s = %s\n", illuminanceSection, groupKey, cemi.GroupAddr(g))
 	}
 	// The occupancy section is left out while it holds nothing but the
 	// defaults of a file without it.

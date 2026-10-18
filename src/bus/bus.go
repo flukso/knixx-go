@@ -52,6 +52,8 @@ const (
 	CmdSensor
 	// CmdMotion reports motion seen by the time-of-flight sensor.
 	CmdMotion
+	// CmdLight publishes Illuminance to the illuminance group.
+	CmdLight
 )
 
 type Command struct {
@@ -65,6 +67,8 @@ type Command struct {
 	// percent are published to the sensor's groups for CmdSensor.
 	Temperature int32
 	Humidity    int32
+	// Illuminance in tenths of a lux is published for CmdLight.
+	Illuminance int32
 }
 
 // write is a group value write waiting to be sent.
@@ -211,6 +215,13 @@ func Run(d io.ReadWriter, dev *thunder.Device, cmds <-chan Command, done chan<- 
 					queue[nq] = newWrite(g, dpt.DPT_9007(float32(cmd.Humidity)/100).Pack())
 					nq++
 				}
+			case CmdLight:
+				g := cur.Sensor.Illuminance
+				if g == 0 {
+					continue
+				}
+				queue[0] = newWrite(g, dpt.DPT_9004(float32(cmd.Illuminance)/10).Pack())
+				nq, next = 1, 0
 			case CmdMotion:
 				g := cur.Occupancy.Group
 				if g == 0 || !occ.motion(time.Now()) {

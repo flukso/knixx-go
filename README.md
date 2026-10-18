@@ -16,6 +16,13 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
 - **Temperature and humidity.** An SHT20 on I2C1 is read every 60 s, the
   first time 5 s after boot. The readings are published as DPT 9.001 (°C)
   and DPT 9.007 (%) to their group addresses.
+- **Illuminance.** The ambient light sensor of a Vishay VCNL4040 on I2C1 is
+  read on the same 60 s rhythm and published as DPT 9.004 (lux), from 0 to
+  6553.5 lx in steps of 0.1 lx.
+  - The ALS measures continuously while powered on, drawing about 260 µA.
+    To keep it low-power, it is powered on for a single measurement of
+    about 160 ms per minute and shut down again, which averages under 1 µA.
+  - Its proximity sensor and interrupt are not used and stay off.
 - **Occupancy.** A VL53L7CX multizone time-of-flight sensor runs its motion
   indicator in autonomous ranging mode at 4x4 zones, with a detection
   threshold on each zone.
@@ -40,7 +47,7 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
   | `sniff [on\|off]` | show or toggle the hex dump of the NCN5121 traffic and its decoded indications |
   | `stat` | report the transceiver state (U_State.ind) and system status (U_SystemStat.ind) |
   | `config [dump \| init \| get <key> \| set <key> <value>]` | see [Configuration](#configuration) |
-  | `sensor` | the latest temperature and humidity reading |
+  | `sensor` | the latest temperature, humidity and illuminance reading |
   | `tof` | the ToF state, settings, warnings, motion count and the per zone motion of the last motion frame |
 
   Use `screen /dev/ttyACM0` or a similar terminal. `tinygo monitor` garbles
@@ -96,6 +103,7 @@ All Go code lives in the `knixx` module in `src/`.
 | `ncn` | NCN5121 services: `TxData` framing and the `Parser` of its indications |
 | `lineedit` | the console's line editor |
 | `internal/sht2x` | SHT2x temperature and humidity sensor driver |
+| `internal/vcnl4040` | VCNL4040 ambient light sensor driver, single measurements |
 | `internal/vl53l7cx` | Go port of ST's VL53L7CX ultra lite driver (ULD) 2.0.1 |
 
 `internal/vl53l7cx` holds:
@@ -113,7 +121,7 @@ All Go code lives in the `knixx` module in `src/`.
 
 ```
  USB CDC console ─ cli.Exec ─────────┐
- runSensor  (SHT20, every 60 s) ─────┼─► cmds (16) ─► bus.Run ─► NCN5121 ─► KNX TP1
+ runSensor  (SHT20, VCNL4040, 60 s) ─┼─► cmds (16) ─► bus.Run ─► NCN5121 ─► KNX TP1
  runToF     (VL53L7CX INT pulses) ───┘                  ▲  UART0
                                                         └─ L_Data.con, indications
 ```
@@ -134,7 +142,9 @@ All Go code lives in the `knixx` module in `src/`.
    - `CmdConfig` replaces its copy of the configuration.
    - Every 10 ms it reads the transceiver and checks the occupancy timeout.
 3. **`runSensor`** triggers an SHT20 measurement every minute and queues the
-   result as a `CmdSensor`.
+   result as a `CmdSensor`. It then takes a single VCNL4040 ALS measurement
+   and queues it as a `CmdLight`. Each sensor is configured, and after an
+   error configured again, independently of the other.
 4. **`runToF`** first sets the sensor up:
    1. It resets the sensor's I2C interface.
    2. It boots the sensor, which includes the firmware upload of about 2 s.
@@ -176,6 +186,9 @@ group = 0/1/1
 [humidity]
 group = 0/1/2
 
+[illuminance]
+group = 0/1/3
+
 [occupancy]
 group = 0/2/1
 timeout = 60
@@ -197,6 +210,7 @@ value in the *missing* column below, which for the group addresses is
 | `A.group`, `B.group` | comma separated group addresses | 0/0/1, 0/0/2 | required | 1 to 8 addresses, no duplicates |
 | `temperature.group` | group address or `-` | 0/1/1 | unbound | |
 | `humidity.group` | group address or `-` | 0/1/2 | unbound | |
+| `illuminance.group` | group address or `-` | 0/1/3 | unbound | |
 | `occupancy.group` | group address or `-` | 0/2/1 | unbound | |
 | `occupancy.timeout` | s without motion until not occupied | 60 | 60 | 1–65535 |
 | `occupancy.threshold` | motion intensity per zone | 44 | 44 | 1–32767 |
@@ -231,6 +245,10 @@ is rejected. `-` unbinds an optional group: nothing is sent for it.
   and the reflectance of what moves. ST quotes 100–500 for typical movement.
   After changing `integration` or the window, use the per zone values shown
   by `tof` to retune `threshold`.
+- **Illuminance range.** The ALS runs at a fixed integration time of 80 ms.
+  Readings clip at 6553.5 lx, for example in direct sunlight, and `sensor`
+  then marks them as saturated. The sensor's tolerance is ±10 %, and there is
+  no correction for a cover lens or window over it.
 - **Timeout.** The timeout restarts on every motion frame. A value shorter
   than the ranging period lets occupancy drop between frames during
   continuous motion.
@@ -265,7 +283,8 @@ config init                 restore and save the built-in default
 | function | Feather pin | nRF52840 |
 |---|---|---|
 | NCN5121 | TX / RX | UART0 |
-| SHT20 and VL53L7CX | SDA / SCL | I2C1 (TWI1) |
+| SHT20 (0x40), VL53L7CX (0x29) and VCNL4040 (0x60) | SDA / SCL | I2C1 (TWI1) |
+| VCNL4040 INT (PROX.INT), unused | A2 | P0.30 |
 | VL53L7CX INT, open drain | SCK | P0.14 |
 | VL53L7CX LPn | MOSI | P0.13 |
 | VL53L7CX I2C_RST | MISO | P0.15 |

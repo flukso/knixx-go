@@ -350,3 +350,25 @@ func TestOccupancy(t *testing.T) {
 		t.Errorf("unbound occupancy sent % x", d.Bytes())
 	}
 }
+
+func TestLight(t *testing.T) {
+	Sniff.Store(false)
+	dev := testDevice()
+	dev.Sensor = thunder.Sensor{Illuminance: 0x0103}
+	reading := Command{Kind: CmdLight, Illuminance: 4321}
+
+	d := fakeDevice{confirm: true}
+	run(t, &d, dev, []Command{reading})
+	want := writes(t, dev, newWrite(0x0103, []byte{0x00, 0x2d, 0x46})) // 432.1 lx
+	if !bytes.Equal(d.Bytes(), want) {
+		t.Errorf("got % x, want % x", d.Bytes(), want)
+	}
+
+	// The temperature and humidity groups do not receive it.
+	dev.Sensor = thunder.Sensor{Temperature: 0x0101, Humidity: 0x0102}
+	d = fakeDevice{confirm: true}
+	run(t, &d, dev, []Command{reading})
+	if d.Len() != 0 {
+		t.Errorf("unbound illuminance sent % x", d.Bytes())
+	}
+}

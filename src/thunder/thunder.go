@@ -36,11 +36,12 @@ func (s *Switch) GroupList() []uint16 {
 	return s.Groups[:s.NGroups]
 }
 
-// Sensor holds the group addresses that temperature and humidity readings
-// are published to. 0 leaves a value unbound.
+// Sensor holds the group addresses that temperature, humidity and
+// illuminance readings are published to. 0 leaves a value unbound.
 type Sensor struct {
 	Temperature uint16
 	Humidity    uint16
+	Illuminance uint16
 }
 
 // Occupancy configures the occupancy derived from the motion indicator of
