@@ -13,7 +13,9 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
 </p>
 
 The renders above, and the top and bottom views in `pcb/`, are made from the
-3D model of the assembled boards.
+3D model of the assembled boards with `make -C render render
+STEP=<model.step>`. The model is not in the repository. The render tool
+installs its Python packages (OpenCascade, PyVista) in a venv in `render/`.
 
 ## Functionality
 
