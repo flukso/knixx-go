@@ -16,14 +16,13 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
 
 ## Functionality
 
-- **Switches A and B.** `switch A on|off` on the console sends a DPT 1.001
-  group value write to each group address the switch is bound to, up to 8.
-  The telegrams go out one at a time. Each waits for the NCN5121's
-  L_Data.con, which confirms that the bus acknowledged it, for at most
-  500 ms.
-- **Wall switches.** Two momentary dual-throw toggles, A and B, do the same.
+- **Wall switches.** Two momentary dual-throw toggles, A and B.
+  - A press up or down sends a DPT 1.001 on or off group value write to each
+    group address the switch is bound to, up to 8.
+  - The telegrams go out one at a time. Each waits for the NCN5121's
+    L_Data.con, which confirms that the bus acknowledged it, for at most
+    500 ms.
   - Each throw pulls its pin low; the contacts are debounced on the board.
-    A press does exactly what `switch <A|B> <on|off>` does on the console.
   - Holding A on and B off together for more than 5 s does `nus on`.
     Holding A off and B on does `nus off`. The two presses that start a
     gesture switch the lights as usual.
@@ -73,7 +72,7 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
   | command | function |
   |---|---|
   | `help` | list the commands |
-  | `switch <A\|B> <on\|off>` | send a switch telegram |
+  | `switch <A\|B> <on\|off>` | send the telegrams of a wall switch press |
   | `sniff [on\|off]` | show or toggle the hex dump of the NCN5121 traffic and its decoded indications |
   | `stat` | report the transceiver state (U_State.ind) and system status (U_SystemStat.ind) |
   | `config [dump \| init \| get <key> \| set <key> <value>]` | see [Configuration](#configuration) |
