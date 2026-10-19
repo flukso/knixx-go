@@ -115,6 +115,32 @@ func TestExec(t *testing.T) {
 	}
 }
 
+func TestSwitch(t *testing.T) {
+	dev := &thunder.Device{
+		Switches: [thunder.NumSwitches]thunder.Switch{
+			thunder.NewSwitch("A", 0x0002),
+			thunder.NewSwitch("B", 0x0003),
+		},
+	}
+	queue := make(chan bus.Command, 1)
+	var w bytes.Buffer
+
+	Switch(dev, queue, "a", false, &w)
+	if got := <-queue; w.Len() != 0 || got != (bus.Command{Kind: bus.CmdSwitch, Switch: 0}) {
+		t.Errorf("switch a off: output %q, queued %+v", w.String(), got)
+	}
+	Switch(dev, queue, "C", true, &w)
+	if w.String() != "unknown switch: C\n" || len(queue) != 0 {
+		t.Errorf("switch C: output %q, queued %d", w.String(), len(queue))
+	}
+	w.Reset()
+	queue <- bus.Command{Kind: bus.CmdStat}
+	Switch(dev, queue, "B", true, &w)
+	if w.String() != "tx queue full\n" {
+		t.Errorf("full queue: output %q", w.String())
+	}
+}
+
 type fakeStore struct {
 	saved []byte
 	err   error

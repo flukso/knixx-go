@@ -21,6 +21,12 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
   The telegrams go out one at a time. Each waits for the NCN5121's
   L_Data.con, which confirms that the bus acknowledged it, for at most
   500 ms.
+- **Wall switches.** Two momentary dual-throw toggles, A and B, do the same.
+  - Each throw pulls its pin low; the contacts are debounced on the board.
+    A press does exactly what `switch <A|B> <on|off>` does on the console.
+  - Holding A on and B off together for more than 5 s does `nus on`.
+    Holding A off and B on does `nus off`. The two presses that start a
+    gesture switch the lights as usual.
 - **Temperature and humidity.** An SHT20 on I2C1 is read every 60 s, the
   first time 5 s after boot. The readings are published as DPT 9.001 (°C)
   and DPT 9.007 (%) to their group addresses.
@@ -80,7 +86,8 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
   Use `screen /dev/ttyACM0` or a similar terminal. `tinygo monitor` garbles
   pasted input.
 - **BLE console.** `nus on` moves the console from USB to the Nordic UART
-  Service (NUS) on BLE.
+  Service (NUS) on BLE. Holding A on + B off on the wall switches for more
+  than 5 s does the same, and A off + B on does `nus off`.
   - The board advertises as `knixx`. Any NUS terminal can connect, such as
     nRF Connect or Serial Bluetooth Terminal, one central at a time.
   - LED2 pulses blue once a second while the console is on BLE.
@@ -88,7 +95,7 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
     and sensor errors, then goes to BLE.
   - `nus off`, typed over BLE, drops the connection, stops advertising and
     moves the console back to USB.
-  - The console also goes back to USB after 300 s without a connected
+  - The console also goes back to USB after 60 s without a connected
     central, counted from `nus on` or the last disconnect, and on reset,
     since BLE is off at boot.
 - **Host tool.** `src/ftdi` runs the same shell and bus logic on a PC. It
@@ -183,7 +190,7 @@ All Go code lives in the `knixx` module in `src/`.
 
 | package | role |
 |---|---|
-| `nrf` | firmware `main` (TinyGo only): pins, the console, the sensor, ToF and LED goroutines, littlefs storage |
+| `nrf` | firmware `main` (TinyGo only): pins, the console, the sensor, ToF, wall switch and LED goroutines, littlefs storage |
 | `ftdi` | host `main`: the shell on an FTDI-attached NCN5121 |
 | `ota` | host `main`: sends a DFU package over BLE to the bootloader, for `make ota` |
 | `bus` | `Run`, the loop that owns the transceiver; the `Command` kinds; the occupancy timer |
@@ -194,6 +201,7 @@ All Go code lives in the `knixx` module in `src/`.
 | `ncn` | NCN5121 services: `TxData` framing and the `Parser` of its indications |
 | `lineedit` | the console's line editor |
 | `nus` | the BLE console transport: the receive `Ring` filled from the SoftDevice interrupt, the `Writer` that sends notifications of 20 bytes, the idle `Timer` |
+| `switches` | the wall switch logic: the press counter `Edges` and the `Hold` gesture detector |
 | `version` | the commit and build time, set at link time |
 | `led` | the status LEDs: the `Trigger`s, the `Player` that queues and plays the modes, and `Run`, the goroutine that owns the LEDs |
 | `internal/sht2x` | SHT2x temperature and humidity sensor driver |
@@ -216,8 +224,9 @@ All Go code lives in the `knixx` module in `src/`.
 
 ```
  USB CDC console ─ cli.Exec ─────────┐
- runSensor  (SHT20, VCNL4040, 60 s) ─┼─► cmds (16) ─► bus.Run ─► NCN5121 ─► KNX TP1
- runToF     (VL53L7CX INT pulses) ───┘                  ▲  UART0
+ runSensor  (SHT20, VCNL4040, 60 s) ─┤
+ runToF     (VL53L7CX INT pulses) ───┼─► cmds (16) ─► bus.Run ─► NCN5121 ─► KNX TP1
+ runSwitches (wall switch presses) ──┘                  ▲  UART0
                                                         └─ L_Data.con, indications
 
  main (init), runToF (start, motion), errors ─► leds (8) ─► led.Run ─► WS2812B ×2
@@ -230,7 +239,8 @@ All Go code lives in the `knixx` module in `src/`.
    4. It writes the built-in default when `knixx.ini` is missing, then parses
       it. On any failure it falls back to the built-in default.
    5. Configure I2C1 at 400 kHz.
-   6. Start `bus.Run`, `runSensor` and `runToF`, then run the console.
+   6. Start `bus.Run`, `runSensor`, `runToF` and `runSwitches`, then run the
+      console.
 2. **`bus.Run`** is the only user of the transceiver and works on its own copy
    of the configuration.
    - It takes one command at a time from `cmds`. A command expands into
@@ -256,7 +266,17 @@ All Go code lives in the `knixx` module in `src/`.
    - It applies setting changes by stopping, reprogramming and restarting
      ranging.
    - When the sensor fails, it reports the error and retries after 60 s.
-5. **`led.Run`** owns the LEDs. Its channel of triggers is the only way in.
+5. **`runSwitches`** watches the wall switches.
+   - The GPIOTE interrupt handler of each contact only counts its falling
+     edges.
+   - Every 20 ms the goroutine turns a changed count into `cli.Switch`, the
+     code of the `switch` command.
+   - It reads the pin levels for the hold gestures. Once a gesture has been
+     held for more than 5 s, it fires once and re-arms on release.
+   - Moving the console belongs to the console goroutine, so a gesture only
+     posts a NUS request. `pollSwitchNUS` on the console goroutine carries it
+     out with the code of the `nus` command.
+6. **`led.Run`** owns the LEDs. Its channel of triggers is the only way in.
    - Senders never block: a trigger sent while the channel is full is
      dropped.
    - The modes are queued, up to 8, and play in order.
@@ -267,14 +287,14 @@ All Go code lives in the `knixx` module in `src/`.
    - The strip is written only when a LED changes. Between modes the
      goroutine just waits for a trigger.
    - Errors reach it through `fail` in `nrf` and through `bus.OnError`.
-6. **The console** runs on one port at a time, USB CDC or BLE NUS.
+7. **The console** runs on one port at a time, USB CDC or BLE NUS.
    - `nus on` enables the SoftDevice the first time and registers the NUS
      service, then starts advertising and switches the port.
    - The SoftDevice delivers writes of the central in its SWI2 interrupt.
      They only go into a ring that the console goroutine polls.
    - `pollNUS` on the console goroutine follows connects and disconnects and
      runs the idle timeout.
-7. **`config set`** validates the value, hands the new configuration to
+8. **`config set`** validates the value, hands the new configuration to
    `bus.Run` as `CmdConfig`, saves `config.Format` of it and prints the
    result. `runToF` picks up its settings by polling the device.
 
@@ -422,6 +442,8 @@ config init                 restore and save the built-in default
 | VL53L7CX INT, open drain | SCK | P0.14 |
 | VL53L7CX LPn | MOSI | P0.13 |
 | VL53L7CX I2C_RST | MISO | P0.15 |
+| wall switch A on / A off, active low, internal pull-up | D9 / D10 | P0.26 / P0.27 |
+| wall switch B on / B off, active low, internal pull-up | A0 / A1 | P0.04 / P0.05 |
 | QSPI flash, in single-line SPI mode | on board | SPI0: P0.17, P0.22, P0.19, CS P0.20; WP# P0.23, HOLD# P0.21 |
 
 ## Renders

@@ -35,6 +35,7 @@ func main() {
 	go bus.Run(machine.UART0, dev, cmds, done)
 	go runSensor(cmds)
 	go runToF(dev, cmds)
+	go runSwitches(dev, cmds)
 
 	runConsole(append(cli.Commands(dev, flashStore{}, cmds), sensorCmd(), tofCmd(dev), nusCmd(), otaCmd(), versionCmd()), log.Bytes())
 }

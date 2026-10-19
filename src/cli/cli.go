@@ -42,12 +42,7 @@ func Commands(dev *thunder.Device, store config.Store, cmds chan<- bus.Command) 
 					fmt.Fprintln(w, err)
 					return
 				}
-				i, ok := dev.SwitchIndex(name)
-				if !ok {
-					fmt.Fprintln(w, "unknown switch:", name)
-					return
-				}
-				enqueue(w, cmds, bus.Command{Kind: bus.CmdSwitch, Switch: i, On: on})
+				Switch(dev, cmds, name, on, w)
 			},
 		},
 		{
@@ -191,6 +186,18 @@ func Exec(cmds []Cmd, line string, w io.Writer) (quit bool) {
 	}
 	fmt.Fprintf(w, "unknown command %q, try help\n", fields[0])
 	return false
+}
+
+// Switch queues the command that sets the switch with the case-insensitive
+// name to on. It is what the switch command does, and what the wall
+// switches do; errors are written to w.
+func Switch(dev *thunder.Device, cmds chan<- bus.Command, name string, on bool, w io.Writer) {
+	i, ok := dev.SwitchIndex(name)
+	if !ok {
+		fmt.Fprintln(w, "unknown switch:", name)
+		return
+	}
+	enqueue(w, cmds, bus.Command{Kind: bus.CmdSwitch, Switch: i, On: on})
 }
 
 // enqueue hands cmd to the transmit goroutine without blocking the console.

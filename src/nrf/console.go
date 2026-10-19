@@ -71,6 +71,7 @@ func attach(p port, greet bool) {
 func runConsole(cmds []cli.Cmd, banner []byte) {
 	for {
 		pollNUS()
+		pollSwitchNUS()
 		if active.Buffered() == 0 {
 			time.Sleep(consolePoll)
 			continue

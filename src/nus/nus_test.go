@@ -126,8 +126,11 @@ func TestTimer(t *testing.T) {
 	if tm.Expired(t0.Add(IdleTimeout-time.Millisecond)) || !tm.Expired(t0.Add(IdleTimeout)) {
 		t.Error("expiry not at IdleTimeout")
 	}
-	if left := tm.Left(t0.Add(time.Minute)); left != IdleTimeout-time.Minute {
+	if left := tm.Left(t0.Add(IdleTimeout / 4)); left != IdleTimeout-IdleTimeout/4 {
 		t.Errorf("left %v", left)
+	}
+	if left := tm.Left(t0.Add(IdleTimeout + time.Second)); left != 0 {
+		t.Errorf("left after expiry %v", left)
 	}
 	tm.Disarm()
 	if tm.Expired(t0.Add(time.Hour)) {

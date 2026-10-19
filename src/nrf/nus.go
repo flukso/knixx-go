@@ -9,6 +9,7 @@ import (
 	"knixx/cli"
 	"knixx/led"
 	"knixx/nus"
+	"knixx/switches"
 	"machine"
 	"sync/atomic"
 	"time"
@@ -184,28 +185,76 @@ func nusCmd() cli.Cmd {
 			case len(args) == 0:
 				nusState(w)
 			case len(args) == 1 && args[0] == "on":
-				if onNUS() {
-					fmt.Fprintln(w, "nus: already on")
-					return
-				}
-				fmt.Fprintf(w, "nus: advertising as %q; the console moves to BLE, back to USB after %d s without a connection, on nus off or on reset\n",
-					nusName, int(nus.IdleTimeout/time.Second))
-				if err := nusOn(); err != nil {
-					fail("nus:", err)
-				}
+				nusStart(w)
 			case len(args) == 1 && args[0] == "off":
-				if !onNUS() {
-					fmt.Fprintln(w, "nus: not on")
-					return
-				}
-				fmt.Fprintln(w, "nus: off, console back on USB")
-				nusOff()
-				fmt.Fprintln(console, "nus: off, console back on USB")
+				nusStop(w)
 			default:
 				fmt.Fprintln(w, "usage: nus [on|off]")
 			}
 		},
 	}
+}
+
+// nusStart is nus on: it moves the console to BLE, reporting on w.
+func nusStart(w io.Writer) {
+	if onNUS() {
+		fmt.Fprintln(w, "nus: already on")
+		return
+	}
+	fmt.Fprintf(w, "nus: advertising as %q; the console moves to BLE, back to USB after %d s without a connection, on nus off or on reset\n",
+		nusName, int(nus.IdleTimeout/time.Second))
+	if err := nusOn(); err != nil {
+		fail("nus:", err)
+	}
+}
+
+// nusStop is nus off: it moves the console back to USB, reporting on w and
+// on USB.
+func nusStop(w io.Writer) {
+	if !onNUS() {
+		fmt.Fprintln(w, "nus: not on")
+		return
+	}
+	fmt.Fprintln(w, "nus: off, console back on USB")
+	nusOff()
+	fmt.Fprintln(console, "nus: off, console back on USB")
+}
+
+// NUS requests of the wall switch gestures, see requestNUS.
+const (
+	nusKeep int32 = iota
+	nusWantOn
+	nusWantOff
+)
+
+// nusRequest holds the latest NUS request of the wall switches. The switch
+// goroutine sets it; the console goroutine, which owns the console port,
+// carries it out in pollSwitchNUS.
+var nusRequest atomic.Int32
+
+// requestNUS asks the console goroutine for nus on or off.
+func requestNUS(on bool) {
+	if on {
+		nusRequest.Store(nusWantOn)
+	} else {
+		nusRequest.Store(nusWantOff)
+	}
+}
+
+// pollSwitchNUS carries out the NUS request of the wall switches as the nus
+// command would. It runs on the console goroutine.
+func pollSwitchNUS() {
+	switch nusRequest.Swap(nusKeep) {
+	case nusWantOn:
+		fmt.Fprintf(console, "\nswitches: A on + B off held %d s\n", int(switches.HoldTime/time.Second))
+		nusStart(console)
+	case nusWantOff:
+		fmt.Fprintf(console, "\nswitches: A off + B on held %d s\n", int(switches.HoldTime/time.Second))
+		nusStop(console)
+	default:
+		return
+	}
+	console.Write([]byte(prompt))
 }
 
 // nusState reports whether the console runs on BLE.

@@ -136,7 +136,7 @@ func (w *Writer) send(chunk []byte) bool {
 
 // IdleTimeout is how long NUS waits for a central before the console goes
 // back to USB.
-const IdleTimeout = 300 * time.Second
+const IdleTimeout = 60 * time.Second
 
 // Timer is the idle timer: it runs while no central is connected.
 type Timer struct {
