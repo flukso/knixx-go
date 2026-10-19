@@ -6,6 +6,15 @@ and the knixx Thunder and Thunder Sensor boards (schematics in `pcb/`). It is
 written in Go and compiled with [TinyGo](https://tinygo.org). It talks to the
 KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
 
+<p align="center">
+  <img src="pcb/Knixx_Thunder_00_iso_front.png" alt="knixx Thunder, front" width="32%">
+  <img src="pcb/Knixx_Thunder_00_iso_back.png" alt="knixx Thunder, back" width="32%">
+  <img src="pcb/Knixx_Thunder_00_side.png" alt="knixx Thunder, side" width="32%">
+</p>
+
+The renders above, and the top and bottom views in `pcb/`, are made from the
+3D model of the assembled boards.
+
 ## Functionality
 
 - **Switches A and B.** `switch A on|off` on the console sends a DPT 1.001
