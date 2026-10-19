@@ -14,11 +14,6 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
   <img src="pcb/Knixx_Thunder_00_side.png" alt="knixx Thunder, side" width="32%">
 </p>
 
-The renders above, and the top and bottom views in `pcb/`, are made from the
-3D model of the assembled boards with `make -C render render
-STEP=<model.step>`. The model is not in the repository. The render tool
-installs its Python packages (OpenCascade, PyVista) in a venv in `render/`.
-
 ## Functionality
 
 - **Switches A and B.** `switch A on|off` on the console sends a DPT 1.001
@@ -104,7 +99,7 @@ installs its Python packages (OpenCascade, PyVista) in a venv in `render/`.
 ## Building and testing
 
 Requirements:
-- TinyGo 0.42.0, installed in `/usr/local/lib/tinygo`;
+- TinyGo 0.43.0, installed in `/usr/local/lib/tinygo`;
 - Go for the host build and tests;
 - libftdi for `src/ftdi`;
 - a C compiler, only to regenerate the VL53L7CX golden test log;
@@ -124,14 +119,14 @@ tracked files differ from it, and the build time in UTC, through `-ldflags
 -X` on `knixx/version`. A commit rebuilds the DFU package even when no
 source changed.
 
-**Patched TinyGo.** The firmware is built against a patched copy of TinyGo.
-The Makefile copies the system install to `tinygo/root-0.42.0` once, applies
-`patches/tinygo-0.42.0-*.patch` and exports `TINYGOROOT`. The copy is rebuilt
-whenever a patch changes. The patches fix the nRF52840 USB device driver,
-which could lock up the console:
-- **epdata:** fixes endpoint data handling while browsing the history;
-- **single DMA:** keeps a single USBD DMA transfer in flight when text is
-  pasted.
+**Patched TinyGo.** The firmware builds with the system TinyGo install.
+When `patches/` holds patches for its version
+(`patches/tinygo-<version>-*.patch`), the Makefile instead copies the install
+to `tinygo/root-<version>` once, applies them there and exports `TINYGOROOT`;
+the copy is rebuilt whenever a patch changes. TinyGo 0.43.0 needs no patches:
+it includes the nRF52840 USB device driver fixes (tinygo-org/tinygo#5794)
+that 0.42.0 needed patches for, which kept the console from locking up while
+browsing the history or pasting text.
 
 **Regenerated files.** `go generate ./internal/vl53l7cx`, run in `src/`,
 regenerates two kinds of files:
@@ -428,6 +423,14 @@ config init                 restore and save the built-in default
 | VL53L7CX LPn | MOSI | P0.13 |
 | VL53L7CX I2C_RST | MISO | P0.15 |
 | QSPI flash, in single-line SPI mode | on board | SPI0: P0.17, P0.22, P0.19, CS P0.20; WP# P0.23, HOLD# P0.21 |
+
+## Renders
+
+The renders at the top of this README, and the top and bottom views in
+`pcb/`, are made from the 3D model of the assembled boards with
+`make -C render render STEP=<model.step>`. The model is not in the
+repository. The render tool installs its Python packages (OpenCascade,
+PyVista) in a venv in `render/`.
 
 ## License
 

@@ -1,12 +1,21 @@
-# Builds the nrf firmware with a TinyGo root that carries the local patches
-# in patches/. The system install is copied once into tinygo/root-<version>
-# and patched there; it is rebuilt whenever a patch changes.
+# Builds the nrf firmware with the system TinyGo install, or, when there are
+# local patches for its version in patches/, with a patched copy of it: the
+# install is then copied once into tinygo/root-<version> and patched there,
+# and the copy is rebuilt whenever a patch changes. TinyGo 0.43.0 needs no
+# patches.
 
-TINYGO_VERSION := 0.42.0
+TINYGO_VERSION := 0.43.0
 TINYGO_SYSTEM  := /usr/local/lib/tinygo
-TINYGOROOT     := $(CURDIR)/tinygo/root-$(TINYGO_VERSION)
 PATCHES        := $(sort $(wildcard patches/tinygo-$(TINYGO_VERSION)-*.patch))
-STAMP          := $(TINYGOROOT)/.knixx-patched
+
+ifneq ($(PATCHES),)
+TINYGOROOT := $(CURDIR)/tinygo/root-$(TINYGO_VERSION)
+STAMP      := $(TINYGOROOT)/.knixx-patched
+export TINYGOROOT
+else
+STAMP :=
+unexport TINYGOROOT
+endif
 
 TARGET   := feather-nrf52840
 FIRMWARE := build/knixx.uf2
@@ -27,26 +36,26 @@ LDFLAGS    := -ldflags "-X knixx/version.Commit=$(GIT_COMMIT) -X knixx/version.D
 
 # The goroutine stack size. TinyGo cannot size the stacks automatically for
 # this firmware (its call graph reaches the runtime's recursive panic path),
-# so they would fall back to the target's 2 KiB, too little for the console
-# and fmt; a goroutine stack overflow followed. Stacks come from the heap.
+# so they would fall back to a default stack, which was 2 KiB before TinyGo
+# 0.43.0 and too little for the console and fmt; a goroutine stack overflow
+# followed. 0.43.0 defaults to 8 KiB on the nRF52840; the size stays explicit.
+# Stacks come from the heap.
 STACK_SIZE := 8KB
 
-export TINYGOROOT
+.PHONY: nrf flash dfu ota test tinygo-root tinygo-version clean
 
-.PHONY: nrf flash dfu ota test tinygo-root clean
-
-nrf: $(STAMP)
+nrf: $(STAMP) | tinygo-version
 	@mkdir -p build
 	cd src && tinygo build -target=$(TARGET) -stack-size=$(STACK_SIZE) $(LDFLAGS) -size short -o ../$(FIRMWARE) ./nrf
 
-flash: $(STAMP)
+flash: $(STAMP) | tinygo-version
 	cd src && tinygo flash -target=$(TARGET) -stack-size=$(STACK_SIZE) $(LDFLAGS) ./nrf
 
 # dfu builds the package for a BLE update of the application with the
 # Adafruit bootloader; 0x00B6 is the firmware id of its S140 6.1.1.
 dfu: $(DFU)
 
-$(HEX): $(STAMP) $(FW_SRC) $(GIT_REFS)
+$(HEX): $(STAMP) $(FW_SRC) $(GIT_REFS) | tinygo-version
 	@mkdir -p build
 	cd src && tinygo build -target=$(TARGET) -stack-size=$(STACK_SIZE) $(LDFLAGS) -o ../$(HEX) ./nrf
 
@@ -61,13 +70,19 @@ ota: $(DFU)
 test:
 	cd src && go vet ./... && go test ./...
 
-tinygo-root: $(STAMP)
+# tinygo-root makes the patched copy, if there are patches.
+tinygo-root: $(STAMP) | tinygo-version
 
-$(STAMP): $(PATCHES)
+# tinygo-version checks that the system install is the expected version. It
+# is an order-only prerequisite, so it does not force rebuilds.
+tinygo-version:
 	@case "$$(env -u TINYGOROOT tinygo version)" in \
 	  "tinygo version $(TINYGO_VERSION) "*) ;; \
 	  *) echo "expected tinygo $(TINYGO_VERSION), got: $$(env -u TINYGOROOT tinygo version)" >&2; exit 1 ;; \
 	esac
+
+ifneq ($(PATCHES),)
+$(STAMP): $(PATCHES) | tinygo-version
 	rm -rf $(TINYGOROOT)
 	cp -a $(TINYGO_SYSTEM) $(TINYGOROOT)
 	set -e; for p in $(PATCHES); do \
@@ -75,6 +90,7 @@ $(STAMP): $(PATCHES)
 	done
 	tinygo clean
 	touch $@
+endif
 
 clean:
 	rm -rf build
