@@ -66,6 +66,7 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
   | `sensor` | the latest temperature, humidity and illuminance reading |
   | `tof` | the ToF state, settings, warnings, motion count and the per zone motion of the last motion frame |
   | `nus [on\|off]` | show the BLE console state, move the console to BLE NUS or back to USB |
+  | `ota` | reboot into the bootloader for a BLE firmware update, see [Over-the-air update](#over-the-air-update) |
 
   Use `screen /dev/ttyACM0` or a similar terminal. `tinygo monitor` garbles
   pasted input.
@@ -92,11 +93,15 @@ Requirements:
 - TinyGo 0.42.0, installed in `/usr/local/lib/tinygo`;
 - Go for the host build and tests;
 - libftdi for `src/ftdi`;
-- a C compiler, only to regenerate the VL53L7CX golden test log.
+- a C compiler, only to regenerate the VL53L7CX golden test log;
+- `adafruit-nrfutil` (`pip install adafruit-nrfutil`) for `make dfu` and
+  `make ota`, and a Bluetooth adapter with BlueZ for `make ota`.
 
 ```sh
 make nrf     # build build/knixx.uf2
 make flash   # build and flash the Feather
+make dfu     # build the DFU package build/knixx-dfu.zip, if the sources changed
+make ota     # build the DFU package if needed and flash it over BLE; ADDR=<mac> picks a board
 make test    # go vet and go test ./... on the host
 ```
 
@@ -116,6 +121,48 @@ regenerates two kinds of files:
 - the golden log `internal/vl53l7cx/testdata/configure.golden` of ST's C
   driver.
 
+### Over-the-air update
+
+1. Run `make ota` on the host. It builds `build/knixx-dfu.zip` if needed,
+   then waits up to 60 s for a bootloader in BLE DFU mode.
+2. Type `ota` on the USB console or the BLE console. The firmware writes
+   0xA8 to GPREGRET and resets. If the SoftDevice runs after `nus on`, the
+   write goes through the SoftDevice. The Adafruit bootloader then starts its
+   BLE DFU mode and advertises as `AdaDFU`.
+3. `make ota` connects and sends the package with the legacy Nordic DFU
+   protocol. The bootloader validates and starts the new firmware.
+
+Phone apps that speak legacy DFU, such as nRF Connect or Bluefruit Connect,
+can also send `build/knixx-dfu.zip`.
+
+Caveats:
+- `ota` resets the board: a telegram in flight is lost and the occupancy
+  state is cleared.
+- The bootloader stays in DFU mode until it gets an update or a reset.
+- `make ota` takes the first `AdaDFU` it sees. With several boards in DFU
+  mode, use `ADDR=`. The bootloader advertises with the board's address plus
+  one in the last byte.
+- The bootloader runs the radio on its RC oscillator. With BlueZ's default
+  connection parameters (30-50 ms, 420 ms supervision timeout) an Intel AX200
+  never establishes the link (`le-connection-abort-by-local`), and the
+  bootloader stops advertising after the failed attempt, so `ota` must be run
+  again. Connecting at 15-30 ms with a 2 s timeout works. Set it until the next
+  reboot with
+
+  ```sh
+  cd /sys/kernel/debug/bluetooth/hci0
+  echo 24 | sudo tee conn_max_interval && echo 12 | sudo tee conn_min_interval
+  echo 200 | sudo tee supervision_timeout
+  bluetoothctl remove <AdaDFU address>   # drop the parameters kept for it
+  ```
+
+  or for good in `/etc/bluetooth/main.conf` under `[LE]`
+  (`MinConnectionInterval=12`, `MaxConnectionInterval=24`,
+  `ConnectionSupervisionTimeout=200`), followed by a restart of bluetoothd.
+- The transfer writes packets of the negotiated ATT MTU less 3, up to 244
+  bytes, which sends a 300 KB image in about 35 s. With the 20-byte default
+  it takes over 10 minutes.
+
 ## Code layout
 
 All Go code lives in the `knixx` module in `src/`.
@@ -124,6 +171,7 @@ All Go code lives in the `knixx` module in `src/`.
 |---|---|
 | `nrf` | firmware `main` (TinyGo only): pins, the console, the sensor, ToF and LED goroutines, littlefs storage |
 | `ftdi` | host `main`: the shell on an FTDI-attached NCN5121 |
+| `ota` | host `main`: sends a DFU package over BLE to the bootloader, for `make ota` |
 | `bus` | `Run`, the loop that owns the transceiver; the `Command` kinds; the occupancy timer |
 | `cli` | the console commands shared by both mains, and `Exec` |
 | `config` | ini `Parse`, `Format`, `Get`, `Set` and `Keys`; the embedded `default.ini`; `Load` and `FileStore` for the host |
@@ -136,6 +184,7 @@ All Go code lives in the `knixx` module in `src/`.
 | `internal/sht2x` | SHT2x temperature and humidity sensor driver |
 | `internal/vcnl4040` | VCNL4040 ambient light sensor driver, single measurements |
 | `internal/vl53l7cx` | Go port of ST's VL53L7CX ultra lite driver (ULD) 2.0.1 |
+| `internal/legacydfu` | the legacy Nordic DFU protocol of the Adafruit bootloader, and reading `adafruit-nrfutil` packages |
 
 `internal/vl53l7cx` holds:
 - **The Go port:** initialisation and firmware upload, the ranging settings,

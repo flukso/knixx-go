@@ -10,6 +10,12 @@ STAMP          := $(TINYGOROOT)/.knixx-patched
 
 TARGET   := feather-nrf52840
 FIRMWARE := build/knixx.uf2
+HEX      := build/knixx.hex
+DFU      := build/knixx-dfu.zip
+
+# The sources of the firmware, so that the DFU package is only rebuilt when
+# one of them changed.
+FW_SRC := $(shell find src -name '*.go' -o -name '*.ini' -o -name '*.bin') src/go.mod src/go.sum
 
 # The goroutine stack size. TinyGo cannot size the stacks automatically for
 # this firmware (its call graph reaches the runtime's recursive panic path),
@@ -19,7 +25,7 @@ STACK_SIZE := 8KB
 
 export TINYGOROOT
 
-.PHONY: nrf flash test tinygo-root clean
+.PHONY: nrf flash dfu ota test tinygo-root clean
 
 nrf: $(STAMP)
 	@mkdir -p build
@@ -27,6 +33,22 @@ nrf: $(STAMP)
 
 flash: $(STAMP)
 	cd src && tinygo flash -target=$(TARGET) -stack-size=$(STACK_SIZE) ./nrf
+
+# dfu builds the package for a BLE update of the application with the
+# Adafruit bootloader; 0x00B6 is the firmware id of its S140 6.1.1.
+dfu: $(DFU)
+
+$(HEX): $(STAMP) $(FW_SRC)
+	@mkdir -p build
+	cd src && tinygo build -target=$(TARGET) -stack-size=$(STACK_SIZE) -o ../$(HEX) ./nrf
+
+$(DFU): $(HEX)
+	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --sd-req 0x00B6 --application $(HEX) $(DFU)
+
+# ota waits for a board in BLE DFU mode (run ota on its console) and sends
+# the DFU package over BlueZ. ADDR= selects a board by address.
+ota: $(DFU)
+	cd src && go run ./ota -zip ../$(DFU) $(if $(ADDR),-addr $(ADDR))
 
 test:
 	cd src && go vet ./... && go test ./...
