@@ -67,6 +67,7 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
   | `tof` | the ToF state, settings, warnings, motion count and the per zone motion of the last motion frame |
   | `nus [on\|off]` | show the BLE console state, move the console to BLE NUS or back to USB |
   | `ota` | reboot into the bootloader for a BLE firmware update, see [Over-the-air update](#over-the-air-update) |
+  | `version` | the commit and build time of the firmware, also shown in the banner |
 
   Use `screen /dev/ttyACM0` or a similar terminal. `tinygo monitor` garbles
   pasted input.
@@ -104,6 +105,11 @@ make dfu     # build the DFU package build/knixx-dfu.zip, if the sources changed
 make ota     # build the DFU package if needed and flash it over BLE; ADDR=<mac> picks a board
 make test    # go vet and go test ./... on the host
 ```
+
+**Version.** The nrf builds embed the short commit hash, with `-dirty` when
+tracked files differ from it, and the build time in UTC, through `-ldflags
+-X` on `knixx/version`. A commit rebuilds the DFU package even when no
+source changed.
 
 **Patched TinyGo.** The firmware is built against a patched copy of TinyGo.
 The Makefile copies the system install to `tinygo/root-0.42.0` once, applies
@@ -180,6 +186,7 @@ All Go code lives in the `knixx` module in `src/`.
 | `ncn` | NCN5121 services: `TxData` framing and the `Parser` of its indications |
 | `lineedit` | the console's line editor |
 | `nus` | the BLE console transport: the receive `Ring` filled from the SoftDevice interrupt, the `Writer` that sends notifications of 20 bytes, the idle `Timer` |
+| `version` | the commit and build time, set at link time |
 | `led` | the status LEDs: the `Trigger`s, the `Player` that queues and plays the modes, and `Run`, the goroutine that owns the LEDs |
 | `internal/sht2x` | SHT2x temperature and humidity sensor driver |
 | `internal/vcnl4040` | VCNL4040 ambient light sensor driver, single measurements |

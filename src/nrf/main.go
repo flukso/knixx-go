@@ -9,6 +9,7 @@ import (
 	"knixx/bus"
 	"knixx/cli"
 	"knixx/led"
+	"knixx/version"
 	"machine"
 )
 
@@ -20,6 +21,7 @@ func main() {
 
 	var log bytes.Buffer
 	log.WriteString("=== knixx thunder ===\n")
+	log.WriteString(version.String() + "\n")
 
 	machine.UART0.Configure(machine.UARTConfig{BaudRate: baud})
 	bus.Out = console
@@ -34,7 +36,7 @@ func main() {
 	go runSensor(cmds)
 	go runToF(dev, cmds)
 
-	runConsole(append(cli.Commands(dev, flashStore{}, cmds), sensorCmd(), tofCmd(dev), nusCmd(), otaCmd()), log.Bytes())
+	runConsole(append(cli.Commands(dev, flashStore{}, cmds), sensorCmd(), tofCmd(dev), nusCmd(), otaCmd(), versionCmd()), log.Bytes())
 }
 
 // configureI2C sets up I2C1, which the SHT20 and the VL53L7CX share. I2C0
