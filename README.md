@@ -1,5 +1,7 @@
 # knixx thunder
 
+**Flip a switch, sense the room, speak KNX.**
+
 knixx thunder is a KNX TP1 bus device built on an
 [Adafruit Feather nRF52840 Express](https://www.adafruit.com/product/4062)
 and the knixx Thunder and Thunder Sensor boards (schematics in `pcb/`). It is
