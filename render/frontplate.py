@@ -4,6 +4,8 @@ usage: frontplate.py <model.step> <outdir>
 
 Reads the STEP model of the boards and writes:
   <outdir>/<model>_frontplate.step  the plate alone, in the assembly frame
+  <outdir>/<model>_frontplate.dxf   the plate's outline for cutting, in mm,
+                                    with its lower-left corner at the origin
   <outdir>/<model>_assembly.step    the boards, with the sensor board moved
                                     to its standoff height, plus the plate
 """
@@ -12,6 +14,7 @@ import math
 import os
 import sys
 
+from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
 from OCP.BRepBndLib import BRepBndLib
 from OCP.BRepGProp import BRepGProp
@@ -22,14 +25,16 @@ from OCP.IFSelect import IFSelect_RetDone
 from OCP.Interface import Interface_Static
 from OCP.Quantity import Quantity_Color, Quantity_TOC_RGB
 from OCP.STEPCAFControl import STEPCAFControl_Reader, STEPCAFControl_Writer
+from OCP.GeomAbs import GeomAbs_Circle, GeomAbs_Line, GeomAbs_Plane
 from OCP.STEPControl import STEPControl_AsIs
 from OCP.TCollection import TCollection_ExtendedString
 from OCP.TDF import TDF_Label
 from OCP.TDataStd import TDataStd_Name
 from OCP.TDocStd import TDocStd_Document
-from OCP.TopAbs import TopAbs_SHELL
+from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_SHELL
 from OCP.TopExp import TopExp_Explorer
 from OCP.TopLoc import TopLoc_Location
+from OCP.TopoDS import TopoDS
 from OCP.XCAFDoc import XCAFDoc_ColorSurf, XCAFDoc_DocumentTool, XCAFDoc_Location
 from OCP.collections import Sequence_TDF_Label
 from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
@@ -172,6 +177,60 @@ def add_plate(doc, st, plate, parent=None):
     st.UpdateAssemblies()
 
 
+def write_dxf(plate, path):
+    """Writes the edges of the plate's top face as an R12 DXF in mm: lines,
+    circles and arcs, shifted so that the plate's lower-left corner is at
+    the origin."""
+    x0, y0, _, _, _, z1 = bbox(plate)
+    top = None
+    e = TopExp_Explorer(plate, TopAbs_FACE)
+    while e.More():
+        f = TopoDS.Face(e.Current())
+        if BRepAdaptor_Surface(f).GetType() == GeomAbs_Plane and abs(bbox(f)[2] - z1) < 1e-6:
+            top = f
+        e.Next()
+    if top is None:
+        sys.exit("plate: no top face")
+
+    def pt(p):
+        return p.X() - x0, p.Y() - y0
+
+    entities = []
+    e = TopExp_Explorer(top, TopAbs_EDGE)
+    while e.More():
+        c = BRepAdaptor_Curve(TopoDS.Edge(e.Current()))
+        t0, t1 = c.FirstParameter(), c.LastParameter()
+        if c.GetType() == GeomAbs_Line:
+            (ax, ay), (bx, by) = pt(c.Value(t0)), pt(c.Value(t1))
+            entities.append(("LINE", [(10, ax), (20, ay), (11, bx), (21, by)]))
+        elif c.GetType() == GeomAbs_Circle:
+            circ = c.Circle()
+            cx, cy = pt(circ.Location())
+            r = circ.Radius()
+            if abs(t1 - t0 - 2 * math.pi) < 1e-9:
+                entities.append(("CIRCLE", [(10, cx), (20, cy), (40, r)]))
+            else:
+                # DXF arcs run counterclockwise from the start angle.
+                angles = [math.degrees(math.atan2(y - cy, x - cx)) % 360
+                          for x, y in (pt(c.Value(t0)), pt(c.Value(t1)))]
+                if circ.Axis().Direction().Z() < 0:
+                    angles.reverse()
+                entities.append(("ARC", [(10, cx), (20, cy), (40, r), (50, angles[0]), (51, angles[1])]))
+        else:
+            sys.exit(f"plate: cannot write a {c.GetType()} edge to DXF")
+        e.Next()
+
+    out = ["0", "SECTION", "2", "ENTITIES"]
+    for kind, codes in entities:
+        out += ["0", kind, "8", "0"]
+        for code, v in codes:
+            out += [str(code), f"{v:.6f}"]
+    out += ["0", "ENDSEC", "0", "EOF"]
+    with open(path, "w") as f:
+        f.write("\n".join(out) + "\n")
+    return entities
+
+
 def write(doc, path):
     Interface_Static.SetCVal_s("write.step.schema", "AP214IS")
     Interface_Static.SetCVal_s("write.step.unit", "MM")
@@ -188,6 +247,7 @@ def main():
     model, outdir = sys.argv[1:]
     base = os.path.join(outdir, os.path.splitext(os.path.basename(model))[0])
     plate_out = base + "_frontplate.step"
+    dxf_out = base + "_frontplate.dxf"
     assembly_out = base + "_assembly.step"
 
     m = Model(model)
@@ -240,6 +300,7 @@ def main():
     pdoc = TDocStd_Document(TCollection_ExtendedString("XmlOcaf"))
     add_plate(pdoc, XCAFDoc_DocumentTool.ShapeTool_s(pdoc.Main()), plate)
     write(pdoc, plate_out)
+    entities = write_dxf(plate, dxf_out)
 
     add_plate(m.doc, m.st, plate, parent=m.root)
     write(m.doc, assembly_out)
@@ -247,7 +308,8 @@ def main():
     props = GProp_GProps()
     BRepGProp.VolumeProperties_s(plate, props)
     print(f"plate bbox {tuple(round(v, 2) for v in bbox(plate))}, volume {props.Mass():.1f} mm3")
-    print(f"wrote {plate_out}\nwrote {assembly_out}")
+    print(f"dxf: {', '.join(k for k, _ in entities)}")
+    print(f"wrote {plate_out}\nwrote {dxf_out}\nwrote {assembly_out}")
 
 
 if __name__ == "__main__":

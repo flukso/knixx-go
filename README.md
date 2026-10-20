@@ -477,8 +477,10 @@ repository. The render tool installs its Python packages (OpenCascade,
 PyVista) in a venv in `render/`.
 
 `make -C render frontplate STEP=<model.step>` makes the STEP of the front
-plate, `<model>_frontplate.step`, and of the boards with the plate,
-`<model>_assembly.step`, next to the PNGs:
+plate, `<model>_frontplate.step`, its outline for cutting,
+`<model>_frontplate.dxf`, and the STEP of the boards with the plate,
+`<model>_assembly.step`, next to the PNGs. The DXF is R12 in mm, made of
+lines, circles and arcs, with the plate's lower-left corner at the origin.
 
 - **Plate:** 1 mm steel, 80 × 80 mm. Ø12.2 mm holes for the toggle switch
   bushings, 20 mm left and right of the centre.
