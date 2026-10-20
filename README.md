@@ -476,6 +476,19 @@ The renders at the top of this README, and the top and bottom views in
 repository. The render tool installs its Python packages (OpenCascade,
 PyVista) in a venv in `render/`.
 
+`make -C render frontplate STEP=<model.step>` makes the STEP of the front
+plate, `<model>_frontplate.step`, and of the boards with the plate,
+`<model>_assembly.step`, next to the PNGs:
+
+- **Plate:** 1 mm steel, 80 × 80 mm. Ø12.2 mm holes for the toggle switch
+  bushings, 20 mm left and right of the centre.
+- **Window:** a 23 × 3 mm slot with rounded ends, centred on the VL53L7CX.
+- **Height:** the plate's underside sits 3 mm above the switch bodies.
+- **Sensor board:** in the assembly, its underside is moved to 12 mm above
+  the main board.
+
+The dimensions are constants at the top of `render/frontplate.py`.
+
 ## License
 
 The code in this repository is released under the MIT license, see
