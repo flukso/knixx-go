@@ -25,7 +25,8 @@ const (
 // covers the NCN5121's worst case of 3 NACK and 3 BUSY repetitions.
 var conTimeout = 500 * time.Millisecond
 
-// Sniff enables the hex dump of the bytes exchanged with the transceiver.
+// Sniff enables the trace of the transceiver's indications and of the
+// decoded telegrams on the bus.
 var Sniff atomic.Bool
 
 // Occupied reports the occupancy that Run last published.
@@ -49,12 +50,6 @@ func errorln(a ...any) {
 func failed() {
 	if OnError != nil {
 		OnError()
-	}
-}
-
-func dump(prefix string, buf []byte) {
-	if Sniff.Load() {
-		fmt.Fprintf(Out, "%s % x\n", prefix, buf)
 	}
 }
 
@@ -131,6 +126,8 @@ func newWrite(group uint16, data []byte) write {
 
 type receiver struct {
 	parser ncn.Parser
+	// dec decodes the frames while sniffing.
+	dec decoder
 	// stat requests that a U_State.ind and U_SystemStat.ind be reported in
 	// full; the flags record which of the two have been seen.
 	stat, gotState, gotSystemStat bool
@@ -138,11 +135,17 @@ type receiver struct {
 	gotCon, conPositive bool
 }
 
-// handle dumps data and reports the services it contains.
+// handle reports the services data contains. Frames are decoded only while
+// sniffing.
 func (r *receiver) handle(data []byte) {
-	dump("<", data)
 	for _, b := range data {
 		s, v := r.parser.Feed(b)
+		if s == ncn.L_DataInd {
+			if Sniff.Load() {
+				fmt.Fprintf(Out, "  %s\n", r.dec.describe(r.parser.Frame()))
+			}
+			continue
+		}
 		if s == ncn.L_DataCon {
 			r.gotCon, r.conPositive = true, ncn.ConPositive(v)
 		}
@@ -172,8 +175,8 @@ func (r *receiver) handle(data []byte) {
 // replaces. It returns once cmds is closed and drained, closing done.
 func Run(d io.ReadWriter, dev *thunder.Device, cmds <-chan Command, done chan<- struct{}) {
 	var input [128]byte
-	var rx receiver
 	cur := *dev
+	rx := receiver{dec: decoder{dev: &cur}}
 
 	// The writes of the command being sent, and the index of the next one.
 	var queue [thunder.MaxGroups]write
@@ -249,6 +252,7 @@ func Run(d io.ReadWriter, dev *thunder.Device, cmds <-chan Command, done chan<- 
 				stat(d, &rx, input[:])
 			case CmdConfig:
 				cur = cmd.Dev
+				rx.dec.reset()
 			}
 		case <-ticker.C:
 			if n, _ := d.Read(input[:]); n > 0 {
@@ -292,7 +296,6 @@ func send(d io.Writer, dev *thunder.Device, group uint16, data []byte) bool {
 		errorln(err)
 		return false
 	}
-	dump(">", buf)
 	if _, err := ncn.TxData(d, buf); err != nil {
 		errorln(err)
 		return false
@@ -304,7 +307,6 @@ func send(d io.Writer, dev *thunder.Device, group uint16, data []byte) bool {
 // to statTimeout for both replies.
 func stat(d io.ReadWriter, rx *receiver, input []byte) {
 	req := [...]byte{ncn.U_StateReq, ncn.U_SystemStatReq}
-	dump(">", req[:])
 	if _, err := d.Write(req[:]); err != nil {
 		errorln(err)
 		return

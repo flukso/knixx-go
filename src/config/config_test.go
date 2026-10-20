@@ -307,7 +307,7 @@ func TestOccupancy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := thunder.Occupancy{Group: uint16(cemi.NewGroupAddr3(0, 2, 1)), Timeout: 60, Threshold: 44,
+	want := thunder.Occupancy{Group: uint16(cemi.NewGroupAddr3(5, 0, 1)), Timeout: 60, Threshold: 44,
 		Frequency: 1, Integration: 5, MinDistance: 400, MaxDistance: 1500}
 	if def.Occupancy != want {
 		t.Errorf("default Occupancy = %+v, want %+v", def.Occupancy, want)
@@ -379,7 +379,7 @@ func TestOccupancy(t *testing.T) {
 	}
 
 	// A section written before the ranging keys existed keeps their defaults.
-	old, err := Parse([]byte(base + "[occupancy]\ngroup = 0/2/1\ntimeout = 60\nthreshold = 44\n"))
+	old, err := Parse([]byte(base + "[occupancy]\ngroup = 5/0/1\ntimeout = 60\nthreshold = 44\n"))
 	if err != nil {
 		t.Fatal(err)
 	}

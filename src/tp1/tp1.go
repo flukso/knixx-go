@@ -3,6 +3,7 @@ package tp1
 import (
 	"encoding/binary"
 	"errors"
+	"strconv"
 )
 
 const (
@@ -140,6 +141,56 @@ func (tg *Telegram) Pack() ([]byte, error) {
 	return buffer, nil
 }
 
+// Unpack decodes a standard frame as built by Pack, checksum included, into
+// tg. Data gets the octets from the APCI octet on, with the APCI bits of its
+// first octet cleared, in a new slice; Length is set to its length.
+func (tg *Telegram) Unpack(buffer []byte) error {
+	if len(buffer) < apci+1 {
+		return errors.New("tp1: frame too short")
+	}
+	if checksum(buffer[:len(buffer)-1]) != buffer[len(buffer)-1] {
+		return errors.New("tp1: checksum mismatch")
+	}
+	if buffer[ctrl]&^(1<<repeatOffset|3<<priorityOffset) != ctrlDefault&^(1<<repeatOffset) {
+		return errors.New("tp1: not a standard frame")
+	}
+	length := int(buffer[npci] & maxPayloadLength)
+	if len(buffer) != length+8 {
+		return errors.New("tp1: length does not match the frame")
+	}
+	transport := Transport(buffer[tpci] >> transportOffset)
+	if transport > NumberedDataPacket {
+		return errors.New("tp1: control data transports not yet supported")
+	}
+
+	tg.Ctrl = Ctrl{
+		Repeat:   buffer[ctrl]&(1<<repeatOffset) == 0,
+		Priority: Priority(buffer[ctrl] >> priorityOffset & 0x03),
+	}
+	tg.Src = binary.BigEndian.Uint16(buffer[src1:dest1])
+	tg.Dest = binary.BigEndian.Uint16(buffer[dest1:npci])
+	tg.Npci = Npci{
+		AddrType: AddrType(buffer[npci] >> addrTypeOffset),
+		Routing:  Routing(buffer[npci] >> routingOffset & routingMask),
+		Length:   Length(length),
+	}
+	tg.Tpci = Tpci{
+		Transport: transport,
+		Sequence:  Sequence(buffer[tpci] >> sequenceOffset & sequenceMask),
+	}
+	tg.Apci = Apci(buffer[tpci]&0x03<<apci1NegOffset | buffer[apci]>>apci2Offset)
+	if length == 0 {
+		// The APCI octet is the checksum: Pack drops the low APCI bits.
+		tg.Apci &^= 0x03
+		tg.Data = nil
+		return nil
+	}
+	tg.Data = make([]byte, length)
+	copy(tg.Data, buffer[apci:apci+length])
+	tg.Data[0] &^= 0x03 << apci2Offset
+	return nil
+}
+
 func repeat2uint8(r Repeat) uint8 {
 	if r {
 		return 0
@@ -153,4 +204,29 @@ func checksum(buffer []byte) uint8 {
 		checksum ^= x
 	}
 	return checksum
+}
+
+var priorityNames = [...]string{"system", "high", "alarm", "low"}
+
+func (p Priority) String() string {
+	if int(p) < len(priorityNames) {
+		return priorityNames[p]
+	}
+	return "priority " + strconv.Itoa(int(p))
+}
+
+var apciNames = [...]string{
+	"GroupValueRead", "GroupValueResponse", "GroupValueWrite",
+	"IndividualAddrWrite", "IndividualAddrRequest", "IndividualAddrResponse",
+	"AdcRead", "AdcResponse",
+	"MemoryRead", "MemoryResponse", "MemoryWrite",
+	"UserMessage", "MaskVersionRead", "MaskVersionResponse",
+	"Restart", "Escape",
+}
+
+func (a Apci) String() string {
+	if int(a) < len(apciNames) {
+		return apciNames[a]
+	}
+	return "APCI " + strconv.Itoa(int(a))
 }

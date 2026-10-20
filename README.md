@@ -73,7 +73,7 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
   |---|---|
   | `help` | list the commands |
   | `switch <A\|B> <on\|off>` | send the telegrams of a wall switch press |
-  | `sniff [on\|off]` | show or toggle the hex dump of the NCN5121 traffic and its decoded indications |
+  | `sniff [on\|off]` | show or toggle the trace of the NCN5121 indications and the decoded telegrams on the bus |
   | `stat` | report the transceiver state (U_State.ind) and system status (U_SystemStat.ind) |
   | `config [dump \| init \| get <key> \| set <key> <value>]` | see [Configuration](#configuration) |
   | `sensor` | the latest temperature, humidity and illuminance reading |
@@ -192,12 +192,12 @@ All Go code lives in the `knixx` module in `src/`.
 | `nrf` | firmware `main` (TinyGo only): pins, the console, the sensor, ToF, wall switch and LED goroutines, littlefs storage |
 | `ftdi` | host `main`: the shell on an FTDI-attached NCN5121 |
 | `ota` | host `main`: sends a DFU package over BLE to the bootloader, for `make ota` |
-| `bus` | `Run`, the loop that owns the transceiver; the `Command` kinds; the occupancy timer |
+| `bus` | `Run`, the loop that owns the transceiver; the `Command` kinds; the occupancy timer; the sniffer's telegram decoding |
 | `cli` | the console commands shared by both mains, and `Exec` |
 | `config` | ini `Parse`, `Format`, `Get`, `Set` and `Keys`; the embedded `default.ini`; `Load` and `FileStore` for the host |
 | `thunder` | the device model `Device` with its `Switch`, `Sensor` and `Occupancy`, the configuration limits and telegram building |
-| `tp1` | KNX TP1 telegram packing |
-| `ncn` | NCN5121 services: `TxData` framing and the `Parser` of its indications |
+| `tp1` | KNX TP1 telegram packing and unpacking |
+| `ncn` | NCN5121 services: `TxData` framing and the `Parser` of its indications and received frames |
 | `lineedit` | the console's line editor |
 | `nus` | the BLE console transport: the receive `Ring` filled from the SoftDevice interrupt, the `Writer` that sends notifications of 20 bytes, the idle `Timer` |
 | `switches` | the wall switch logic: the press counter `Edges` and the `Hold` gesture detector |
@@ -248,6 +248,18 @@ All Go code lives in the `knixx` module in `src/`.
    - Further commands wait until the writes are done.
    - `CmdConfig` replaces its copy of the configuration.
    - Every 10 ms it reads the transceiver and checks the occupancy timeout.
+   - With `sniff on` it decodes each frame from the bus, including the echo
+     of the frames it sends, with `tp1.Unpack`. It prints the source,
+     destination, service, data, priority and routing counter. For a group
+     this device binds, it also prints what the group is bound to, its DPT
+     and the value, for example `L_Data.ind: 1.1.5 > 0/0/1 GroupValueWrite
+     $01 (A, DPT 1.001: On), low priority, routing 6`.
+   - A group that is not bound gets the DPT of the bindings on its main and
+     middle group, when they agree, for example `(DPT 9.001: 21.50 °C)`
+     for 2/0/7 with the default configuration. When a value does not
+     unpack with that DPT, only the raw data is printed.
+   - These lookups use tables built from the configuration on the first
+     decoded frame and rebuilt after a `CmdConfig`.
 3. **`runSensor`** triggers an SHT20 measurement every minute and queues the
    result as a `CmdSensor`. It then takes a single VCNL4040 ALS measurement
    and queues it as a `CmdLight`. Each sensor is configured, and after an
@@ -318,16 +330,16 @@ group = 0/0/1
 group = 0/0/2
 
 [temperature]
-group = 0/1/1
+group = 2/0/1
 
 [humidity]
-group = 0/1/2
+group = 3/0/1
 
 [illuminance]
-group = 0/1/3
+group = 4/0/1
 
 [occupancy]
-group = 0/2/1
+group = 5/0/1
 timeout = 60
 threshold = 44
 frequency = 1
@@ -345,10 +357,10 @@ value in the *missing* column below, which for the group addresses is
 |---|---|---|---|---|
 | `device.individual` | individual address | 7.8.1 | required | area 0–15, line 0–15, device 0–255; not 0.0.0 |
 | `A.group`, `B.group` | comma separated group addresses | 0/0/1, 0/0/2 | required | 1 to 8 addresses, no duplicates |
-| `temperature.group` | group address or `-` | 0/1/1 | unbound | |
-| `humidity.group` | group address or `-` | 0/1/2 | unbound | |
-| `illuminance.group` | group address or `-` | 0/1/3 | unbound | |
-| `occupancy.group` | group address or `-` | 0/2/1 | unbound | |
+| `temperature.group` | group address or `-` | 2/0/1 | unbound | |
+| `humidity.group` | group address or `-` | 3/0/1 | unbound | |
+| `illuminance.group` | group address or `-` | 4/0/1 | unbound | |
+| `occupancy.group` | group address or `-` | 5/0/1 | unbound | |
 | `occupancy.timeout` | s without motion until not occupied | 60 | 60 | 1–65535 |
 | `occupancy.threshold` | motion intensity per zone | 44 | 44 | 1–32767 |
 | `occupancy.frequency` | ranging frequency, Hz | 1 | 1 | 1–60 |

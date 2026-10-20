@@ -61,10 +61,10 @@ func TestParser(t *testing.T) {
 	}{
 		{"clean echo",
 			[]byte{0xbc, 0x78, 0x01, 0x00, 0x02, 0x81, 0x00, 0x80, 0x39, 0x13, 0x8b},
-			[]event{{U_FrameStateInd, 0x13}, {L_DataCon, 0x8b}}},
+			[]event{{L_DataInd, 0}, {U_FrameStateInd, 0x13}, {L_DataCon, 0x8b}}},
 		{"data octets that look like services",
 			[]byte{0xbc, 0x07, 0x03, 0x4b, 0x13, 0x81, 0x00, 0x8b, 0x17, 0x0b},
-			[]event{{L_DataCon, 0x0b}}},
+			[]event{{L_DataInd, 0}, {L_DataCon, 0x0b}}},
 		{"protocol and receive errors, reset",
 			[]byte{0x17, 0x47, 0x03},
 			[]event{{U_StateInd, 0x17}, {U_StateInd, 0x47}, {U_ResetInd, 0x03}}},
@@ -87,12 +87,38 @@ func TestParser(t *testing.T) {
 	}
 }
 
+func TestParserFrame(t *testing.T) {
+	short := []byte{0xbc, 0x78, 0x01, 0x00, 0x02, 0x81, 0x00, 0x80, 0x39}
+	long := []byte{0xbc, 0x11, 0x05, 0x00, 0x03, 0xef,
+		0x00, 0x80, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 0x00}
+	var p Parser
+	if f := p.Frame(); len(f) != 0 {
+		t.Errorf("Frame before any frame = % x", f)
+	}
+	for _, frame := range [][]byte{short, long, short} {
+		for i, b := range frame {
+			s, _ := p.Feed(b)
+			if last := i == len(frame)-1; last != (s == L_DataInd) {
+				t.Fatalf("octet %d of % x: service %d", i, frame, s)
+			}
+		}
+		if !bytes.Equal(p.Frame(), frame) {
+			t.Errorf("Frame = % x, want % x", p.Frame(), frame)
+		}
+		// A service after the frame leaves it in place.
+		if s, _ := p.Feed(0x8b); s != L_DataCon || !bytes.Equal(p.Frame(), frame) {
+			t.Errorf("after L_Data.con: service %d, Frame % x", s, p.Frame())
+		}
+	}
+}
+
 func TestDescribe(t *testing.T) {
 	tests := []struct {
 		s    Service
 		b    byte
 		want string
 	}{
+		{L_DataInd, 0, "L_Data.ind"},
 		{L_DataCon, 0x8b, "L_Data.con: positive"},
 		{L_DataCon, 0x0b, "L_Data.con: negative"},
 		{U_ResetInd, 0x03, "U_Reset.ind"},

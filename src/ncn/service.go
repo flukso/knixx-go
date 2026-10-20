@@ -7,6 +7,9 @@ type Service uint8
 
 const (
 	None Service = iota
+	// L_DataInd is a standard frame from the bus, see Parser.Frame. The
+	// transceiver also echoes the frames it sends.
+	L_DataInd
 	L_DataCon
 	U_ResetInd
 	U_StateInd
@@ -30,15 +33,25 @@ const (
 	npciIndex     = 5
 	lengthMask    = 0x0f
 	frameOverhead = 8
+	maxStdFrame   = frameOverhead + lengthMask
 )
 
 // Parser splits the byte stream from the NCN5121 into KNX frames and service
-// indications. Bytes belonging to a standard frame are skipped, so data
-// octets are not mistaken for services. Extended frames are not recognised.
+// indications. Bytes belonging to a standard frame are collected apart, so
+// data octets are not mistaken for services. Extended frames are not
+// recognised.
 type Parser struct {
 	n         int // octets of the current frame seen so far
 	length    int // total frame length, 0 until the NPCI octet is seen
 	systemHdr bool
+	frame     [maxStdFrame]byte
+	done      int // length of the last completed frame
+}
+
+// Frame returns the frame of the last L_DataInd, checksum included. It is
+// valid until the next call of Feed.
+func (p *Parser) Frame() []byte {
+	return p.frame[:p.done]
 }
 
 // Feed processes one received byte. It returns the service it completes,
@@ -49,15 +62,19 @@ func (p *Parser) Feed(b byte) (Service, byte) {
 		p.systemHdr = false
 		return U_SystemStatInd, b
 	case p.n > 0:
+		p.frame[p.n] = b
 		p.n++
 		if p.n == npciIndex+1 {
 			p.length = frameOverhead + int(b&lengthMask)
 		}
 		if p.length > 0 && p.n == p.length {
+			p.done = p.length
 			p.n, p.length = 0, 0
+			return L_DataInd, 0
 		}
 		return None, 0
 	case b&lDataStandardMask == lDataStandard:
+		p.frame[0] = b
 		p.n = 1
 		return None, 0
 	case b == uSystemStat:
@@ -83,6 +100,8 @@ func ConPositive(b byte) bool {
 // Describe renders a service returned by Parser.Feed.
 func Describe(s Service, b byte) string {
 	switch s {
+	case L_DataInd:
+		return "L_Data.ind"
 	case L_DataCon:
 		if ConPositive(b) {
 			return "L_Data.con: positive"

@@ -14,11 +14,14 @@ import (
 // confirm set it answers every frame with U_FrameState.ind and a positive
 // L_Data.con, and flags a frame written before the previous one's
 // confirmation was read.
+//
+// Each U_State.req written hands out the next of onStat.
 type fakeDevice struct {
 	bytes.Buffer
 	rx      []byte
 	confirm bool
 	overlap bool
+	onStat  [][]byte
 }
 
 func (f *fakeDevice) Read(p []byte) (int, error) {
@@ -33,6 +36,10 @@ func (f *fakeDevice) Write(p []byte) (int, error) {
 			f.overlap = true
 		}
 		f.rx = append(f.rx, 0x13, 0x8b)
+	}
+	if len(p) > 0 && p[0] == ncn.U_StateReq && len(f.onStat) > 0 {
+		f.rx = append(f.rx, f.onStat[0]...)
+		f.onStat = f.onStat[1:]
 	}
 	return f.Buffer.Write(p)
 }
