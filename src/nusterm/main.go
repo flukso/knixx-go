@@ -90,23 +90,19 @@ func run(name, addr string, wait time.Duration) error {
 		return fmt.Errorf("write: %w", err)
 	}
 
-	input := make(chan []byte)
+	input := newPending()
 	go read(input)
 	for {
 		select {
 		case <-gone:
 			fmt.Fprint(os.Stderr, "\r\n[disconnected]\r\n")
 			return nil
-		case p, ok := <-input:
-			if !ok {
-				// stdin ended, as with piped input: leave the board time
-				// to answer.
-				time.Sleep(time.Second)
-				return nil
-			}
+		case <-input.ready:
+			p, eof := input.take()
 			out, quit := chunks(p, size)
 			// Writes with response pace the input to what the board
 			// takes, so that a paste does not overflow its receive ring.
+			// What is typed meanwhile goes out with the next write.
 			for _, c := range out {
 				if _, err := rx.Write(c); err != nil {
 					return fmt.Errorf("write: %w", err)
@@ -116,20 +112,26 @@ func run(name, addr string, wait time.Duration) error {
 				fmt.Fprint(os.Stderr, "\r\n")
 				return nil
 			}
+			if eof {
+				// stdin ended, as with piped input: leave the board time
+				// to answer.
+				time.Sleep(time.Second)
+				return nil
+			}
 		}
 	}
 }
 
-// read sends what is read from stdin to input, and closes it at the end.
-func read(input chan<- []byte) {
+// read queues what is read from stdin in input, and closes it at the end.
+func read(input *pending) {
 	buf := make([]byte, 256)
 	for {
 		n, err := os.Stdin.Read(buf)
 		if n > 0 {
-			input <- append([]byte(nil), buf[:n]...)
+			input.add(buf[:n])
 		}
 		if err != nil {
-			close(input)
+			input.close()
 			return
 		}
 	}

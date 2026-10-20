@@ -1,5 +1,55 @@
 package main
 
+import "sync"
+
+// pending collects what is typed while a write to the board is in flight,
+// so that it goes out together in the next write instead of one write per
+// key, each waiting for its response.
+type pending struct {
+	mu  sync.Mutex
+	buf []byte
+	eof bool
+	// ready holds a token while there is something to take.
+	ready chan struct{}
+}
+
+func newPending() *pending {
+	return &pending{ready: make(chan struct{}, 1)}
+}
+
+// add queues p, read from the terminal.
+func (q *pending) add(p []byte) {
+	q.mu.Lock()
+	q.buf = append(q.buf, p...)
+	q.mu.Unlock()
+	q.signal()
+}
+
+// close records the end of the input.
+func (q *pending) close() {
+	q.mu.Lock()
+	q.eof = true
+	q.mu.Unlock()
+	q.signal()
+}
+
+func (q *pending) signal() {
+	select {
+	case q.ready <- struct{}{}:
+	default:
+	}
+}
+
+// take returns everything queued since the last take, and whether the
+// input ended.
+func (q *pending) take() ([]byte, bool) {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	p := q.buf
+	q.buf = nil
+	return p, q.eof
+}
+
 // Escape ends the session: Ctrl-], as in telnet.
 const Escape = 0x1d
 

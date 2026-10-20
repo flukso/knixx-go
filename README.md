@@ -103,6 +103,8 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
       - The tool uses CoreBluetooth through cgo, so build it on the Mac
         itself.
   - LED2 pulses blue once a second while the console is on BLE.
+  - The board asks the central for a 15 ms connection interval, which keeps
+    typing responsive.
   - The banner shows on the first key. Output to the console, including bus
     and sensor errors, then goes to BLE.
   - `nus off`, typed over BLE, drops the connection, stops advertising and
@@ -321,6 +323,13 @@ All Go code lives in the `knixx` module in `src/`.
      They only go into a ring that the console goroutine polls.
    - `pollNUS` on the console goroutine follows connects and disconnects and
      runs the idle timeout.
+   - Once a central connects, `pollNUS` asks it for a 15 ms connection
+     interval. The central picks it otherwise: 30–50 ms with BlueZ. Each
+     typed key costs one connection event for the write and one for the
+     echo, so the shorter interval roughly halves the echo time, to about
+     27 ms on Linux.
+   - The console and the senders poll every 2 ms, which adds little to that
+     echo time.
    - Output never waits for a terminal. Every write goes into a 2 KiB queue
      of the active port, and a sender goroutine per port moves it to USB
      CDC or NUS. This matters because the USB CDC write waits for room until

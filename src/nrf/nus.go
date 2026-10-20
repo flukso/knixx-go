@@ -26,6 +26,15 @@ const nusName = "knixx"
 // off while a central is connected.
 const nusFlushTimeout = time.Second
 
+// The connection parameters requested from a central once it connected. The
+// central picks the interval, 30 to 50 ms with BlueZ, and each key typed
+// takes an event for the write and one for its echo. 15 ms is the shortest
+// interval that macOS also accepts.
+const (
+	nusInterval    = 15 * time.Millisecond
+	nusSupervision = 4 * time.Second
+)
+
 // sdClockHFCLKRequest is the SVC number of sd_clock_hfclk_request in the
 // S140 6.1.1 nrf_soc.h: SOC_SVC_BASE_NOT_AVAILABLE + 22.
 const sdClockHFCLKRequest = 0x2C + 22
@@ -174,6 +183,13 @@ func pollNUS() {
 		wasConnected = c
 		if c {
 			idle.Disarm()
+			if err := nusCentral.RequestConnectionParams(bluetooth.ConnectionParams{
+				MinInterval: bluetooth.NewDuration(nusInterval),
+				MaxInterval: bluetooth.NewDuration(nusInterval),
+				Timeout:     bluetooth.NewDuration(nusSupervision),
+			}); err != nil {
+				fmt.Fprintln(console, "nus: connection interval:", err)
+			}
 			// The banner follows on the central's first key, once it
 			// subscribed to the notifications.
 			editor.Discard()

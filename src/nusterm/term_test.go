@@ -40,3 +40,38 @@ func TestChunks(t *testing.T) {
 		}
 	}
 }
+
+func TestPending(t *testing.T) {
+	q := newPending()
+	if p, eof := q.take(); p != nil || eof {
+		t.Errorf("empty take = %q, %v", p, eof)
+	}
+	// Keys typed while a write is in flight come out together, with one
+	// token.
+	q.add([]byte("a"))
+	q.add([]byte("bc"))
+	select {
+	case <-q.ready:
+	default:
+		t.Fatal("no token after add")
+	}
+	select {
+	case <-q.ready:
+		t.Error("second token")
+	default:
+	}
+	if p, eof := q.take(); string(p) != "abc" || eof {
+		t.Errorf("take = %q, %v", p, eof)
+	}
+	// What is left at the end of the input still comes out, with eof.
+	q.add([]byte("d\x1d"))
+	q.close()
+	<-q.ready
+	p, eof := q.take()
+	if string(p) != "d\x1d" || !eof {
+		t.Errorf("take at eof = %q, %v", p, eof)
+	}
+	if out, quit := chunks(p, 20); len(out) != 1 || string(out[0]) != "d" || !quit {
+		t.Errorf("chunks = %q, %v", out, quit)
+	}
+}

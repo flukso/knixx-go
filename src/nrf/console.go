@@ -12,10 +12,12 @@ import (
 )
 
 const (
-	prompt      = ">>> "
-	consolePoll = 10 * time.Millisecond
-	// outputPoll is the period at which the senders look for queued output.
-	outputPoll = 5 * time.Millisecond
+	prompt = ">>> "
+	// consolePoll is the period at which the console looks for input, and
+	// outputPoll the one at which the senders look for queued output. Both
+	// add to the echo of each key, which matters on BLE, so they are short.
+	consolePoll = 2 * time.Millisecond
+	outputPoll  = 2 * time.Millisecond
 )
 
 // port is a terminal the console runs on: USB CDC or the BLE NUS. Output
