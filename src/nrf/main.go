@@ -17,6 +17,7 @@ const baud = 38400
 
 func main() {
 	startLEDs()
+	startOutput()
 	signal(led.Init)
 
 	var log bytes.Buffer

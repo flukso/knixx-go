@@ -199,6 +199,7 @@ All Go code lives in the `knixx` module in `src/`.
 | `tp1` | KNX TP1 telegram packing and unpacking |
 | `ncn` | NCN5121 services: `TxData` framing and the `Parser` of its indications and received frames |
 | `lineedit` | the console's line editor |
+| `outq` | the console output `Queue` that writers never wait on, drained by one sender per port |
 | `nus` | the BLE console transport: the receive `Ring` filled from the SoftDevice interrupt, the `Writer` that sends notifications of 20 bytes, the idle `Timer` |
 | `switches` | the wall switch logic: the press counter `Edges` and the `Hold` gesture detector |
 | `version` | the commit and build time, set at link time |
@@ -305,6 +306,16 @@ All Go code lives in the `knixx` module in `src/`.
      They only go into a ring that the console goroutine polls.
    - `pollNUS` on the console goroutine follows connects and disconnects and
      runs the idle timeout.
+   - Output never waits for a terminal. Every write goes into a 2 KiB queue
+     of the active port, and a sender goroutine per port moves it to USB
+     CDC or NUS. This matters because the USB CDC write waits for room until
+     the host reads, which never happens once the cable is pulled while a
+     terminal was open. Before the queue, that stalled the writer: with
+     `sniff on`, the bus loop, and with it the switches.
+   - A write that does not fit is dropped whole. Once the queue has
+     drained, a `[N bytes of output dropped]` line marks the gap.
+   - `nus off` waits up to 1 s for the NUS queue to drain before it drops
+     the central.
 8. **`config set`** validates the value, hands the new configuration to
    `bus.Run` as `CmdConfig`, saves `config.Format` of it and prints the
    result. `runToF` picks up its settings by polling the device.

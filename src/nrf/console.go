@@ -6,6 +6,7 @@ import (
 	"io"
 	"knixx/cli"
 	"knixx/lineedit"
+	"knixx/outq"
 	"machine"
 	"time"
 )
@@ -13,19 +14,50 @@ import (
 const (
 	prompt      = ">>> "
 	consolePoll = 10 * time.Millisecond
+	// outputPoll is the period at which the senders look for queued output.
+	outputPoll = 5 * time.Millisecond
 )
 
-// port is a terminal the console runs on: USB CDC or the BLE NUS.
+// port is a terminal the console runs on: USB CDC or the BLE NUS. Output
+// goes to its queue, which a sender goroutine drains, so that no writer
+// waits for the terminal: the USB CDC write waits for room as long as the
+// host does not read, forever once the cable is pulled while a terminal
+// was open, and the NUS write for each notification the SoftDevice cannot
+// take yet.
 type port interface {
 	Buffered() int
 	ReadByte() (byte, error)
-	io.Writer
+	out() *outq.Queue
+}
+
+// usbPort is the console port on USB CDC.
+type usbPort struct{}
+
+var usbOut outq.Queue
+
+func (usbPort) Buffered() int           { return machine.Serial.Buffered() }
+func (usbPort) ReadByte() (byte, error) { return machine.Serial.ReadByte() }
+func (usbPort) out() *outq.Queue        { return &usbOut }
+
+// startOutput starts the senders of the console ports.
+func startOutput() {
+	go sendOutput(&usbOut, machine.Serial)
+	go sendOutput(&nusOutQ, &nusOut)
+}
+
+// sendOutput drains q to w. It is the only goroutine that waits for w.
+func sendOutput(q *outq.Queue, w io.Writer) {
+	for {
+		if !q.Send(w) {
+			time.Sleep(outputPoll)
+		}
+	}
 }
 
 var (
 	// active is the port the console reads and writes. Only the console
 	// goroutine changes it, see attach.
-	active port = machine.Serial
+	active port = usbPort{}
 
 	editor = lineedit.Editor{Prompt: prompt, Out: activeOut{}}
 
@@ -35,27 +67,17 @@ var (
 	greeted bool
 )
 
-// activeOut writes raw output to the active port.
+// activeOut queues raw output for the active port.
 type activeOut struct{}
 
-func (activeOut) Write(p []byte) (int, error) { return active.Write(p) }
+func (activeOut) Write(p []byte) (int, error) { return active.out().Write(p) }
 
-// crlf translates "\n" into "\r\n" for serial terminals and writes to the
-// active port.
+// crlf queues output for the active port, translating "\n" into "\r\n"
+// for serial terminals. A write that does not fit the queue is dropped
+// whole.
 type crlf struct{}
 
-func (crlf) Write(p []byte) (int, error) {
-	start := 0
-	for i, b := range p {
-		if b == '\n' {
-			active.Write(p[start:i])
-			active.Write([]byte{'\r', '\n'})
-			start = i + 1
-		}
-	}
-	active.Write(p[start:])
-	return len(p), nil
-}
+func (crlf) Write(p []byte) (int, error) { return active.out().WriteCRLF(p) }
 
 var console crlf
 

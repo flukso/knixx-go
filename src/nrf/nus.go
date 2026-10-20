@@ -9,6 +9,7 @@ import (
 	"knixx/cli"
 	"knixx/led"
 	"knixx/nus"
+	"knixx/outq"
 	"knixx/switches"
 	"machine"
 	"sync/atomic"
@@ -20,6 +21,10 @@ import (
 // nusName is the advertised name. With the flags and the 128-bit NUS UUID,
 // the advertising packet leaves room for a name of 8 bytes.
 const nusName = "knixx"
+
+// nusFlushTimeout bounds the wait for the queued output when NUS is turned
+// off while a central is connected.
+const nusFlushTimeout = time.Second
 
 // sdClockHFCLKRequest is the SVC number of sd_clock_hfclk_request in the
 // S140 6.1.1 nrf_soc.h: SOC_SVC_BASE_NOT_AVAILABLE + 22.
@@ -47,7 +52,10 @@ var (
 	wasConnected bool
 	idle         nus.Timer
 
-	nusOut = nus.Writer{
+	// nusOutQ queues the console output for NUS, which a sender goroutine
+	// hands to nusOut.
+	nusOutQ outq.Queue
+	nusOut  = nus.Writer{
 		Send: func(p []byte) error {
 			_, err := nusTx.Write(p)
 			return err
@@ -59,10 +67,10 @@ var (
 // nusPort is the console port on NUS.
 type nusPort struct{}
 
-func (nusPort) Buffered() int               { return nusRx.Buffered() }
-func (nusPort) ReadByte() (byte, error)     { return nusRx.ReadByte() }
-func (nusPort) Write(p []byte) (int, error) { return nusOut.Write(p) }
-func onNUS() bool                           { return active == port(nusPort{}) }
+func (nusPort) Buffered() int           { return nusRx.Buffered() }
+func (nusPort) ReadByte() (byte, error) { return nusRx.ReadByte() }
+func (nusPort) out() *outq.Queue        { return &nusOutQ }
+func onNUS() bool                       { return active == port(nusPort{}) }
 
 // enableBLE enables the SoftDevice and registers the NUS service.
 func enableBLE() error {
@@ -137,15 +145,21 @@ func nusOff() {
 	// While connected the advertising is stopped already, which is fine.
 	nusAdv.Stop()
 	if nusConnected.Load() {
+		// Let the sender hand the queued output, such as the reply to nus
+		// off, to the central before the link drops.
+		for deadline := time.Now().Add(nusFlushTimeout); nusOutQ.Buffered() > 0 && time.Now().Before(deadline); {
+			time.Sleep(outputPoll)
+		}
 		nusCentral.Disconnect()
 	}
+	nusOutQ.Reset()
 	idle.Disarm()
 	led.Notify(leds, led.Trigger{Mode: led.BLE, Cancel: true})
 	// Drop what was typed on USB in the meantime.
 	for machine.Serial.Buffered() > 0 {
 		machine.Serial.ReadByte()
 	}
-	attach(machine.Serial, false)
+	attach(usbPort{}, false)
 }
 
 // pollNUS follows the connection of the central and gives the console back
