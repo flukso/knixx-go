@@ -7,9 +7,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"knixx/internal/blescan"
 	"knixx/internal/legacydfu"
 	"os"
-	"strings"
 	"time"
 
 	"tinygo.org/x/bluetooth"
@@ -43,7 +43,7 @@ func run(zipPath, name, addr string, wait time.Duration) error {
 		target = addr
 	}
 	fmt.Printf("waiting for %s (run ota on the knixx console)...\n", target)
-	found, err := scan(adapter, name, addr, wait)
+	found, err := blescan.Find(adapter, name, addr, wait)
 	if err != nil {
 		return err
 	}
@@ -72,32 +72,6 @@ func run(zipPath, name, addr string, wait time.Duration) error {
 	}
 	fmt.Printf("done in %.0f s, the board restarts with the new firmware\n", time.Since(start).Seconds())
 	return nil
-}
-
-// scan returns the first advertiser named name, or with address addr when
-// that is set.
-func scan(adapter *bluetooth.Adapter, name, addr string, wait time.Duration) (bluetooth.ScanResult, error) {
-	var found bluetooth.ScanResult
-	ok := false
-	timer := time.AfterFunc(wait, func() { adapter.StopScan() })
-	defer timer.Stop()
-	err := adapter.Scan(func(a *bluetooth.Adapter, r bluetooth.ScanResult) {
-		match := r.LocalName() == name
-		if addr != "" {
-			match = strings.EqualFold(r.Address.String(), addr)
-		}
-		if match && !ok {
-			found, ok = r, true
-			a.StopScan()
-		}
-	})
-	if err != nil {
-		return found, fmt.Errorf("scan: %w", err)
-	}
-	if !ok {
-		return found, fmt.Errorf("no bootloader seen within %v", wait)
-	}
-	return found, nil
 }
 
 // link adapts the characteristics of the DFU service to legacydfu.Link.

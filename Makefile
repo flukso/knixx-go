@@ -42,7 +42,7 @@ LDFLAGS    := -ldflags "-X knixx/version.Commit=$(GIT_COMMIT) -X knixx/version.D
 # Stacks come from the heap.
 STACK_SIZE := 8KB
 
-.PHONY: nrf flash dfu ota test tinygo-root tinygo-version clean
+.PHONY: nrf flash dfu ota nus test tinygo-root tinygo-version clean
 
 nrf: $(STAMP) | tinygo-version
 	@mkdir -p build
@@ -66,6 +66,11 @@ $(DFU): $(HEX)
 # the DFU package over BlueZ. ADDR= selects a board by address.
 ota: $(DFU)
 	cd src && go run ./ota -zip ../$(DFU) $(if $(ADDR),-addr $(ADDR))
+
+# nus connects a terminal to the BLE console of a board (run nus on on its
+# console) with this computer's Bluetooth. ADDR= selects a board by address.
+nus:
+	cd src && go run ./nusterm $(if $(ADDR),-addr $(ADDR))
 
 test:
 	cd src && go vet ./... && go test ./...
