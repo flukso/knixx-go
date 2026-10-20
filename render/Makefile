@@ -8,6 +8,9 @@ STEP   ?= ../pcb/Knixx_Thunder_00.step
 OUTDIR ?= ../pcb
 VENV   := .venv
 PYTHON := $(VENV)/bin/python
+# cadquery-ocp has wheels for Python 3.11 to 3.14 only; take the newest of
+# those that is installed. Override with PY=.
+PY     ?= $(firstword $(foreach v,14 13 12 11,$(shell command -v python3.$(v))) python3)
 
 BASE  := $(basename $(notdir $(STEP)))
 VIEWS := iso_front iso_back top bottom side
@@ -30,7 +33,8 @@ $(PLATE) &: $(STEP) frontplate.py $(VENV)/.installed
 	$(PYTHON) frontplate.py $(STEP) $(OUTDIR)
 
 $(VENV)/.installed: requirements.txt
-	python3 -m venv $(VENV)
+	rm -rf $(VENV)
+	$(PY) -m venv $(VENV)
 	$(PYTHON) -m pip install -q -r requirements.txt
 	touch $@
 
