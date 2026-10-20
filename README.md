@@ -125,13 +125,13 @@ Requirements:
 - libftdi for `src/ftdi`;
 - a C compiler, only to regenerate the VL53L7CX golden test log;
 - `adafruit-nrfutil` (`pip install adafruit-nrfutil`) for `make dfu` and
-  `make ota`, and a Bluetooth adapter with BlueZ for `make ota`.
+  `make ota`, and Bluetooth for `make ota`: BlueZ on Linux, or macOS.
 
 ```sh
 make nrf     # build build/knixx.uf2
 make flash   # build and flash the Feather
 make dfu     # build the DFU package build/knixx-dfu.zip, if the sources changed
-make ota     # build the DFU package if needed and flash it over BLE; ADDR=<mac> picks a board
+make ota     # build the DFU package if needed and flash it over BLE; ADDR= picks a board
 make test    # go vet and go test ./... on the host
 ```
 
@@ -177,6 +177,9 @@ Caveats:
 - `make ota` takes the first `AdaDFU` it sees. With several boards in DFU
   mode, use `ADDR=`. The bootloader advertises with the board's address plus
   one in the last byte.
+- On macOS, `make ota` goes through CoreBluetooth as `make nus` does. `ADDR=`
+  is then the UUID that macOS gives the bootloader, which differs from the
+  board's own UUID; `make ota` prints it when it connects.
 - The bootloader runs the radio on its RC oscillator. With BlueZ's default
   connection parameters (30-50 ms, 420 ms supervision timeout) an Intel AX200
   never establishes the link (`le-connection-abort-by-local`), and the
