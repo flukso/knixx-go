@@ -453,7 +453,7 @@ is rejected. `-` unbinds an optional group: nothing is sent for it.
   which the line editor handles like typed keys.
 - **Size limits.**
   - `knixx.ini` must stay under 1024 bytes on the nRF.
-  - A console line holds at most 128 characters, which fits
+  - A console line holds at most 255 characters, which fits
     `config set A.group` with 8 addresses.
 
 ### Console

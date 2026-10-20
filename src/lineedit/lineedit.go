@@ -8,9 +8,10 @@ import (
 )
 
 const (
-	// MaxLine fits a config set line for a switch bound to the most group
-	// addresses, as printed by config dump.
-	MaxLine    = 128
+	// MaxLine is the longest line a uint8 length holds. It fits a config set
+	// line for a switch bound to the most group addresses, as printed by
+	// config dump, with room for pasted lines.
+	MaxLine    = 255
 	HistoryLen = 8
 	// MaxPrompt is the longest prompt redrawn without allocating.
 	MaxPrompt = 16
