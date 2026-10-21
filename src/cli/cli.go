@@ -194,7 +194,9 @@ func Exec(cmds []Cmd, line string, w io.Writer) (quit bool) {
 func Switch(dev *thunder.Device, cmds chan<- bus.Command, name string, on bool, w io.Writer) {
 	i, ok := dev.SwitchIndex(name)
 	if !ok {
-		fmt.Fprintln(w, "unknown switch:", name)
+		// Not fmt with name as an argument: name would escape, and every
+		// call would allocate.
+		io.WriteString(w, "unknown switch: "+name+"\n")
 		return
 	}
 	enqueue(w, cmds, bus.Command{Kind: bus.CmdSwitch, Switch: i, On: on})

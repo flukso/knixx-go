@@ -2,6 +2,8 @@ package bus
 
 import (
 	"bytes"
+	"github.com/vapourismo/knx-go/knx/dpt"
+	"io"
 	"knixx/ncn"
 	"knixx/thunder"
 	"strings"
@@ -87,7 +89,7 @@ func frames(t *testing.T, dev *thunder.Device, on bool, groups ...uint16) []byte
 		if err != nil {
 			t.Fatal(err)
 		}
-		ncn.TxData(&want, buf)
+		ncn.TxData(&want, buf, new(ncn.TxBuf))
 	}
 	return want.Bytes()
 }
@@ -235,6 +237,13 @@ func TestConfig(t *testing.T) {
 	}
 }
 
+// newWrite returns a write of data to group.
+func newWrite(group uint16, data []byte) write {
+	w := write{group: group}
+	w.n = uint8(copy(w.data[:], data))
+	return w
+}
+
 // writes returns the requests for the given group value writes, in order.
 func writes(t *testing.T, dev *thunder.Device, ws ...write) []byte {
 	t.Helper()
@@ -245,7 +254,7 @@ func writes(t *testing.T, dev *thunder.Device, ws ...write) []byte {
 		if err != nil {
 			t.Fatal(err)
 		}
-		ncn.TxData(&want, buf)
+		ncn.TxData(&want, buf, new(ncn.TxBuf))
 	}
 	return want.Bytes()
 }
@@ -402,5 +411,52 @@ func TestLight(t *testing.T) {
 	run(t, &d, dev, []Command{reading})
 	if d.Len() != 0 {
 		t.Errorf("unbound illuminance sent % x", d.Bytes())
+	}
+}
+
+// TestF16Write checks the DPT 9 packing against knx-go, which packs from a
+// float32, for values it holds exactly, and the clamping of values out of
+// range.
+func TestF16Write(t *testing.T) {
+	for _, h := range []int32{0, 1, -1, 2048, -2048, -2049, 2150, 4820, -27300, 100000} {
+		want := dpt.DPT_9002(float32(h) / 100).Pack()
+		if w := f16Write(1, h); !bytes.Equal(w.data[:w.n], want) {
+			t.Errorf("f16Write(%d) = % x, knx-go % x", h, w.data[:w.n], want)
+		}
+	}
+	for h, want := range map[int32][]byte{
+		// knx-go's float32 truncates these one hundredth low.
+		2031:       {0x00, 0x07, 0xef},
+		2047:       {0x00, 0x07, 0xff},
+		67076096:   {0x00, 0x7f, 0xff},
+		-67108864:  {0x00, 0xf8, 0x00},
+		99_999_999: {0x00, 0x7f, 0xff},
+		-99999999:  {0x00, 0xf8, 0x00},
+	} {
+		if w := f16Write(1, h); !bytes.Equal(w.data[:w.n], want) {
+			t.Errorf("f16Write(%d) = % x, want % x", h, w.data[:w.n], want)
+		}
+	}
+	if w := boolWrite(1, true); w.n != 1 || w.data[0] != 1 {
+		t.Errorf("boolWrite(true) = % x", w.data[:w.n])
+	}
+}
+
+// TestSendAllocs sends a telegram: neither packing nor sending allocates.
+func TestSendAllocs(t *testing.T) {
+	prev := Out
+	Out = io.Discard
+	defer func() { Out = prev }()
+	dev := testDevice()
+	var tx sender
+	// As in Run, the write lives outside the send.
+	w := f16Write(0x0101, 2150)
+	allocs := testing.AllocsPerRun(100, func() {
+		if !tx.send(io.Discard, dev, w.group, w.data[:w.n]) {
+			t.Fatal("send failed")
+		}
+	})
+	if allocs != 0 {
+		t.Errorf("send allocated %v times", allocs)
 	}
 }

@@ -189,26 +189,23 @@ type Strip interface {
 	WriteColors(buf []color.RGBA) error
 }
 
+// busyPoll bounds the wait for the next frame while a mode plays, so that a
+// trigger is taken within it.
+const busyPoll = 10 * time.Millisecond
+
 // Run plays the triggers received on triggers on strip, whose first LED is
 // LED1 and second LED2. It writes the strip only when a LED changes and,
 // without a mode to play, only waits for triggers. It returns once triggers
 // is closed.
+//
+// While a mode plays, Run sleeps until the next frame, at most busyPoll at a
+// time, and takes the triggers that came in between. It uses no time.Timer:
+// re-arming a stopped or fired TinyGo timer allocates its queue node.
 func Run(triggers <-chan Trigger, strip Strip) {
 	var p Player
 	// The LEDs keep their colour across a reset of the MCU.
 	var leds [2]color.RGBA
 	strip.WriteColors(leds[:])
-
-	timer := time.NewTimer(time.Hour)
-	stop := func() {
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
-	}
-	stop()
 
 	for {
 		now := time.Now()
@@ -218,21 +215,25 @@ func Run(triggers <-chan Trigger, strip Strip) {
 			strip.WriteColors(leds[:])
 		}
 
-		var wake <-chan time.Time
-		if busy {
-			timer.Reset(next.Sub(now))
-			wake = timer.C
-		}
-		select {
-		case t, ok := <-triggers:
+		if !busy {
+			t, ok := <-triggers
 			if !ok {
 				return
 			}
 			p.Apply(t, time.Now())
-		case <-wake:
+			continue
 		}
-		if busy {
-			stop()
+		time.Sleep(min(next.Sub(now), busyPoll))
+		for taken := true; taken; {
+			select {
+			case t, ok := <-triggers:
+				if !ok {
+					return
+				}
+				p.Apply(t, time.Now())
+			default:
+				taken = false
+			}
 		}
 	}
 }

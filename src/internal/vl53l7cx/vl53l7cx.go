@@ -439,32 +439,37 @@ func (d *Device) Init() error {
 // whose words have size bytes, by the averages of the 2x2 blocks of zones,
 // and zeroes the other 48. It follows the ULD's 4x4 extrapolation.
 func averageGrid(g []byte, size int) {
-	get := func(i int) int64 {
-		if size == 4 {
-			return int64(binary.LittleEndian.Uint32(g[4*i:]))
-		}
-		return int64(int16(binary.LittleEndian.Uint16(g[2*i:])))
-	}
-	put := func(i int, v int64) {
-		if size == 4 {
-			binary.LittleEndian.PutUint32(g[4*i:], uint32(v))
-		} else {
-			binary.LittleEndian.PutUint16(g[2*i:], uint16(int16(v)))
-		}
-	}
 	for j := 0; j < 4; j++ {
 		for i := 0; i < 4; i++ {
 			k := 2*i + 16*j
-			sum := get(k) + get(k+1) + get(k+8) + get(k+9)
+			sum := gridWord(g, size, k) + gridWord(g, size, k+1) +
+				gridWord(g, size, k+8) + gridWord(g, size, k+9)
 			if size == 4 {
 				// unsigned 32 bit arithmetic, as in C
-				put(i+4*j, int64(uint32(sum)/4))
+				setGridWord(g, size, i+4*j, int64(uint32(sum)/4))
 			} else {
-				put(i+4*j, sum/4)
+				setGridWord(g, size, i+4*j, sum/4)
 			}
 		}
 	}
 	clear(g[16*size : 64*size])
+}
+
+// gridWord returns word i of the grid g: unsigned for size 4, signed for 2.
+func gridWord(g []byte, size, i int) int64 {
+	if size == 4 {
+		return int64(binary.LittleEndian.Uint32(g[4*i:]))
+	}
+	return int64(int16(binary.LittleEndian.Uint16(g[2*i:])))
+}
+
+// setGridWord sets word i of the grid g to v.
+func setGridWord(g []byte, size, i int, v int64) {
+	if size == 4 {
+		binary.LittleEndian.PutUint32(g[4*i:], uint32(v))
+	} else {
+		binary.LittleEndian.PutUint16(g[2*i:], uint16(int16(v)))
+	}
 }
 
 func (d *Device) sendOffsetData(resolution int) error {

@@ -7,12 +7,12 @@ import (
 	"io"
 	"knixx/ncn"
 	"knixx/thunder"
+	"knixx/tp1"
 	"os"
 	"sync/atomic"
 	"time"
 
 	"github.com/vapourismo/knx-go/knx/cemi"
-	"github.com/vapourismo/knx-go/knx/dpt"
 )
 
 const (
@@ -118,12 +118,6 @@ func (o *occupancy) expire(now time.Time, timeout time.Duration) bool {
 	return true
 }
 
-func newWrite(group uint16, data []byte) write {
-	w := write{group: group}
-	w.n = uint8(copy(w.data[:], data))
-	return w
-}
-
 type receiver struct {
 	parser ncn.Parser
 	// dec decodes the frames while sniffing.
@@ -192,6 +186,8 @@ func Run(d io.ReadWriter, dev *thunder.Device, cmds <-chan Command, done chan<- 
 	var group uint16
 	var deadline time.Time
 	var occ occupancy
+	// tx holds the frame and the request of the telegram being sent.
+	var tx sender
 
 	defer close(done)
 	ticker := time.NewTicker(rxPoll)
@@ -202,7 +198,7 @@ func Run(d io.ReadWriter, dev *thunder.Device, cmds <-chan Command, done chan<- 
 			w := &queue[next]
 			group = w.group
 			next++
-			if send(d, &cur, group, w.data[:w.n]) {
+			if tx.send(d, &cur, group, w.data[:w.n]) {
 				awaiting, rx.gotCon = true, false
 				deadline = time.Now().Add(conTimeout)
 			}
@@ -223,20 +219,19 @@ func Run(d io.ReadWriter, dev *thunder.Device, cmds <-chan Command, done chan<- 
 					errorln("bus: no switch", cmd.Switch)
 					continue
 				}
-				data := dpt.DPT_1001(cmd.On).Pack()
 				nq, next = 0, 0
 				for _, g := range cur.Switches[cmd.Switch].GroupList() {
-					queue[nq] = newWrite(g, data)
+					queue[nq] = boolWrite(g, cmd.On)
 					nq++
 				}
 			case CmdSensor:
 				nq, next = 0, 0
 				if g := cur.Sensor.Temperature; g != 0 {
-					queue[nq] = newWrite(g, dpt.DPT_9001(float32(cmd.Temperature)/1000).Pack())
+					queue[nq] = f16Write(g, cmd.Temperature/10)
 					nq++
 				}
 				if g := cur.Sensor.Humidity; g != 0 {
-					queue[nq] = newWrite(g, dpt.DPT_9007(float32(cmd.Humidity)/100).Pack())
+					queue[nq] = f16Write(g, cmd.Humidity)
 					nq++
 				}
 			case CmdLight:
@@ -244,7 +239,7 @@ func Run(d io.ReadWriter, dev *thunder.Device, cmds <-chan Command, done chan<- 
 				if g == 0 {
 					continue
 				}
-				queue[0] = newWrite(g, dpt.DPT_9004(float32(cmd.Illuminance)/10).Pack())
+				queue[0] = f16Write(g, cmd.Illuminance*10)
 				nq, next = 1, 0
 			case CmdMotion:
 				g := cur.Occupancy.Group
@@ -252,7 +247,7 @@ func Run(d io.ReadWriter, dev *thunder.Device, cmds <-chan Command, done chan<- 
 					continue
 				}
 				Occupied.Store(true)
-				queue[0] = newWrite(g, dpt.DPT_1018(true).Pack())
+				queue[0] = boolWrite(g, true)
 				nq, next = 1, 0
 			case CmdStat:
 				stat(d, &rx, input[:])
@@ -285,7 +280,7 @@ func Run(d io.ReadWriter, dev *thunder.Device, cmds <-chan Command, done chan<- 
 			if next >= nq && !awaiting && occ.expire(time.Now(), timeout) {
 				Occupied.Store(false)
 				if g := cur.Occupancy.Group; g != 0 {
-					queue[0] = newWrite(g, dpt.DPT_1018(false).Pack())
+					queue[0] = boolWrite(g, false)
 					nq, next = 1, 0
 				}
 			}
@@ -293,43 +288,52 @@ func Run(d io.ReadWriter, dev *thunder.Device, cmds <-chan Command, done chan<- 
 	}
 }
 
+// sender holds the buffers of a telegram being sent, so that sending does
+// not allocate.
+type sender struct {
+	tg    tp1.Telegram
+	frame [tp1.MaxFrame]byte
+	req   ncn.TxBuf
+}
+
 // send transmits the group value write of data to group. It reports whether
 // the telegram was handed to the transceiver.
-func send(d io.Writer, dev *thunder.Device, group uint16, data []byte) bool {
-	tg := dev.GroupWrite(group, data)
-	buf, err := tg.Pack()
+func (s *sender) send(d io.Writer, dev *thunder.Device, group uint16, data []byte) bool {
+	s.tg = dev.GroupWrite(group, data)
+	buf, err := s.tg.PackTo(&s.frame)
 	if err != nil {
 		errorln(err)
 		return false
 	}
-	if _, err := ncn.TxData(d, buf); err != nil {
+	if _, err := ncn.TxData(d, buf, &s.req); err != nil {
 		errorln(err)
 		return false
 	}
 	return true
 }
 
+// statReq requests the state and the system status of the transceiver.
+var statReq = [...]byte{ncn.U_StateReq, ncn.U_SystemStatReq}
+
 // stat requests the state and system status of the transceiver and waits up
 // to statTimeout for both replies.
 func stat(d io.ReadWriter, rx *receiver, input []byte) {
-	req := [...]byte{ncn.U_StateReq, ncn.U_SystemStatReq}
-	if _, err := d.Write(req[:]); err != nil {
+	if _, err := d.Write(statReq[:]); err != nil {
 		errorln(err)
 		return
 	}
 
 	rx.stat, rx.gotState, rx.gotSystemStat = true, false, false
-	defer func() { rx.stat = false }()
-
 	for deadline := time.Now().Add(statTimeout); time.Now().Before(deadline); {
 		time.Sleep(rxPoll)
 		if n, _ := d.Read(input); n > 0 {
 			rx.handle(input[:n])
 		}
 		if rx.gotState && rx.gotSystemStat {
-			return
+			break
 		}
 	}
+	rx.stat = false
 	if !rx.gotState {
 		errorln("  no U_State.ind reply")
 	}

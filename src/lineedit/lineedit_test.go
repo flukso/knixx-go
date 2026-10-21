@@ -204,3 +204,15 @@ func TestDiscard(t *testing.T) {
 		t.Errorf("history lost: %q", got)
 	}
 }
+
+// TestEchoAllocs types and erases a key: the echo does not allocate.
+func TestEchoAllocs(t *testing.T) {
+	e := &Editor{Prompt: "> ", Out: io.Discard}
+	allocs := testing.AllocsPerRun(100, func() {
+		e.Feed('a')
+		e.Feed(keyBackspace)
+	})
+	if allocs != 0 {
+		t.Errorf("echo allocated %v times", allocs)
+	}
+}

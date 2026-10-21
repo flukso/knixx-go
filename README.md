@@ -137,8 +137,20 @@ make dfu     # build the DFU package build/knixx-dfu.zip, if the sources changed
 make ota     # build the DFU package if needed and flash it over BLE; ADDR= picks a board
 make nus     # a terminal on the BLE console of a board; ADDR= picks a board
 make bolt    # build build/bolt, the BLE host tool that make ota and make nus run
-make test    # go vet and go test ./... on the host
+make test    # make allocs, then go vet and go test ./... on the host
+make allocs  # check the firmware's calls that reach the heap against allocs.txt
 ```
+
+**Heap allocations.** The firmware's steady state (the bus, the sniffer,
+the sensor and ToF loops, the wall switches, the console's echo) does not
+allocate, so that the heap does not grow and no GC runs while the board
+works. `make allocs` builds the firmware, disassembles it and lists, with
+`tools/allocs`, every call from the firmware's own code to a function that
+reaches `runtime.alloc`; it fails on a call that is not in `allocs.txt`. The
+accepted calls are outside the steady state (startup, configuration,
+console commands) or on error paths; `make allocs-update` rewrites the list.
+Calls through an interface are not seen, so the steady-state paths also
+have host tests with `testing.AllocsPerRun`.
 
 **Version.** The nrf builds embed the short commit hash, with `-dirty` when
 tracked files differ from it, and the build time in UTC, through `-ldflags
@@ -210,6 +222,7 @@ Caveats:
 
 All Go code lives in the `knixx` module in `src/`. `host/` holds the BLE
 host tools and the packages only they use; the firmware builds none of it.
+`tools/allocs` is the standalone build check behind `make allocs`.
 
 | package | role |
 |---|---|

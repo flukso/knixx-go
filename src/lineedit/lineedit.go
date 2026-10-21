@@ -57,6 +57,8 @@ type Editor struct {
 
 	// redraw assembles a redrawn line so that it is written at once.
 	redraw [1 + MaxPrompt + MaxLine + 3]byte
+	// echo holds the echo of a key.
+	echo [3]byte
 }
 
 // Feed processes one input byte. It returns the completed line when b ends
@@ -107,12 +109,14 @@ func (e *Editor) Feed(b byte) (line []byte, done bool) {
 	case b == keyBackspace || b == keyDelete:
 		if e.n > 0 {
 			e.n--
-			e.Out.Write([]byte{'\b', ' ', '\b'})
+			e.echo = [3]byte{'\b', ' ', '\b'}
+			e.Out.Write(e.echo[:])
 		}
 	case b >= ' ' && b < keyDelete && int(e.n) < len(e.line):
 		e.line[e.n] = b
 		e.n++
-		e.Out.Write([]byte{b})
+		e.echo[0] = b
+		e.Out.Write(e.echo[:1])
 	}
 	return nil, false
 }

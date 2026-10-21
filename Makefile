@@ -42,7 +42,7 @@ LDFLAGS    := -ldflags "-X knixx/version.Commit=$(GIT_COMMIT) -X knixx/version.D
 # Stacks come from the heap.
 STACK_SIZE := 8KB
 
-.PHONY: nrf flash dfu bolt ota nus test tinygo-root tinygo-version clean
+.PHONY: nrf flash dfu bolt ota nus test allocs allocs-update tinygo-root tinygo-version clean
 
 nrf: $(STAMP) | tinygo-version
 	@mkdir -p build
@@ -78,8 +78,25 @@ ota: $(DFU) bolt
 nus: bolt
 	build/bolt term $(if $(ADDR),-addr $(ADDR))
 
-test:
+test: allocs
 	cd src && go vet ./... && go test ./...
+
+# allocs checks the calls by which the firmware's own code reaches the heap,
+# found by tools/allocs in the disassembly of the firmware, against
+# allocs.txt, so that a change cannot add one unnoticed: the steady state of
+# the firmware should not allocate. allocs-update rewrites allocs.txt, for a
+# call that is accepted: outside the steady state, or on an error path.
+ALLOCS_ELF := build/allocs.elf
+
+allocs: $(ALLOCS_ELF)
+	@objdump -d --no-show-raw-insn $(ALLOCS_ELF) | go run tools/allocs/main.go -baseline allocs.txt
+
+allocs-update: $(ALLOCS_ELF)
+	@objdump -d --no-show-raw-insn $(ALLOCS_ELF) | go run tools/allocs/main.go -baseline allocs.txt -update
+
+$(ALLOCS_ELF): $(STAMP) $(FW_SRC) | tinygo-version
+	@mkdir -p build
+	@cd src && tinygo build -target=$(TARGET) -stack-size=$(STACK_SIZE) -o ../$@ ./nrf
 
 # tinygo-root makes the patched copy, if there are patches.
 tinygo-root: $(STAMP) | tinygo-version

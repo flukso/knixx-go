@@ -21,8 +21,21 @@ const (
 	maxPayloadLength = 15
 )
 
-// MaxPayload is the longest Data of a standard frame.
-const MaxPayload = maxPayloadLength
+// MaxPayload is the longest Data of a standard frame, and MaxFrame the
+// longest frame, checksum included.
+const (
+	MaxPayload = maxPayloadLength
+	MaxFrame   = maxPayloadLength + 8
+)
+
+var (
+	errPayload   = errors.New("tp1: max payload length exceeded")
+	errTransport = errors.New("tp1: control data transports not yet supported")
+	errShort     = errors.New("tp1: frame too short")
+	errChecksum  = errors.New("tp1: checksum mismatch")
+	errStandard  = errors.New("tp1: not a standard frame")
+	errLength    = errors.New("tp1: length does not match the frame")
+)
 
 const (
 	ctrlDefault     = 0x90
@@ -118,11 +131,28 @@ type Telegram struct {
 	Data []byte
 }
 
+// Pack encodes tg as a standard frame, checksum included, in a new slice.
+// The firmware uses PackTo, which does not allocate.
 func (tg *Telegram) Pack() ([]byte, error) {
-	var buffer = make([]byte, len(tg.Data)+8)
-	if len(tg.Data) > maxPayloadLength {
-		return nil, errors.New("tp1: max payload length exceeded")
+	var buf [MaxFrame]byte
+	frame, err := tg.PackTo(&buf)
+	if err != nil {
+		return nil, err
 	}
+	return append([]byte(nil), frame...), nil
+}
+
+// PackTo encodes tg as a standard frame, checksum included, into dst and
+// returns the part of dst it fills.
+func (tg *Telegram) PackTo(dst *[MaxFrame]byte) ([]byte, error) {
+	if len(tg.Data) > maxPayloadLength {
+		return nil, errPayload
+	}
+	if tg.Transport > NumberedDataPacket {
+		return nil, errTransport
+	}
+	buffer := dst[:len(tg.Data)+8]
+	clear(buffer)
 	buffer[ctrl] = ctrlDefault |
 		(repeat2uint8(tg.Repeat) << repeatOffset) |
 		(uint8(tg.Priority) << priorityOffset)
@@ -131,15 +161,12 @@ func (tg *Telegram) Pack() ([]byte, error) {
 	buffer[npci] = (uint8(tg.AddrType) << addrTypeOffset) |
 		((uint8(tg.Routing) & routingMask) << routingOffset) |
 		uint8(len(tg.Data))
-	if tg.Transport > NumberedDataPacket {
-		return nil, errors.New("tp1: control data transports not yet supported")
-	}
 	buffer[tpci] = (uint8(tg.Transport) << transportOffset) |
 		((uint8(tg.Sequence) & sequenceMask) << sequenceOffset) |
 		(uint8(tg.Apci) >> apci1NegOffset)
 	copy(buffer[apci:], tg.Data)
 	buffer[apci] |= (uint8(tg.Apci) << apci2Offset)
-	buffer[len(buffer)-1] = checksum(buffer)
+	buffer[len(buffer)-1] = checksum(buffer[:len(buffer)-1])
 
 	return buffer, nil
 }
@@ -151,21 +178,21 @@ func (tg *Telegram) Pack() ([]byte, error) {
 // without allocating; it never shares memory with buffer.
 func (tg *Telegram) Unpack(buffer []byte) error {
 	if len(buffer) < apci+1 {
-		return errors.New("tp1: frame too short")
+		return errShort
 	}
 	if checksum(buffer[:len(buffer)-1]) != buffer[len(buffer)-1] {
-		return errors.New("tp1: checksum mismatch")
+		return errChecksum
 	}
 	if buffer[ctrl]&^(1<<repeatOffset|3<<priorityOffset) != ctrlDefault&^(1<<repeatOffset) {
-		return errors.New("tp1: not a standard frame")
+		return errStandard
 	}
 	length := int(buffer[npci] & maxPayloadLength)
 	if len(buffer) != length+8 {
-		return errors.New("tp1: length does not match the frame")
+		return errLength
 	}
 	transport := Transport(buffer[tpci] >> transportOffset)
 	if transport > NumberedDataPacket {
-		return errors.New("tp1: control data transports not yet supported")
+		return errTransport
 	}
 
 	tg.Ctrl = Ctrl{

@@ -18,7 +18,7 @@ func (w *countingWriter) Write(p []byte) (int, error) {
 func TestTxData(t *testing.T) {
 	var w countingWriter
 	frame := []byte{0xbc, 0x78, 0x01, 0x00, 0x02, 0x81, 0x00, 0x80, 0x39}
-	n, err := TxData(&w, frame)
+	n, err := TxData(&w, frame, new(TxBuf))
 	if err != nil || n != len(frame) {
 		t.Fatalf("TxData = %d, %v", n, err)
 	}
@@ -32,7 +32,7 @@ func TestTxData(t *testing.T) {
 	if w.writes != 1 {
 		t.Errorf("%d writes, want 1", w.writes)
 	}
-	if _, err := TxData(&w, make([]byte, maxFrameLen+1)); err == nil {
+	if _, err := TxData(&w, make([]byte, maxFrameLen+1), new(TxBuf)); err == nil {
 		t.Error("oversized frame: expected an error")
 	}
 }

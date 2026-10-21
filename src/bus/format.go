@@ -70,3 +70,40 @@ func appendHundredths(dst []byte, h int32) []byte {
 	dst = appendDec(dst, uint64(h/100))
 	return append(dst, '.', byte('0'+h/10%10), byte('0'+h%10))
 }
+
+// The DPT 9 bounds, in hundredths.
+const (
+	minF16Pack = -671088_64
+	maxF16Pack = 670760_96
+)
+
+// boolWrite returns a write of a DPT 1 value to group.
+func boolWrite(group uint16, on bool) write {
+	w := write{group: group, n: 1}
+	if on {
+		w.data[0] = 1
+	}
+	return w
+}
+
+// f16Write returns a write of the DPT 9 value h hundredths to group, after
+// the APCI octet: the value is m·2^e hundredths with an 11-bit signed
+// mantissa m, so m loses its low bits as e grows. A value out of range is
+// clamped.
+func f16Write(group uint16, h int32) write {
+	h = min(max(h, minF16Pack), maxF16Pack)
+	m, e := h, uint8(0)
+	for m > 2047 || m < -2048 {
+		m /= 2
+		e++
+	}
+	w := write{group: group, n: 3}
+	w.data[1] = e << 3
+	if m < 0 {
+		m += 2048
+		w.data[1] |= 0x80
+	}
+	w.data[1] |= uint8(m>>8) & 0x07
+	w.data[2] = uint8(m)
+	return w
+}

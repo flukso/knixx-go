@@ -355,3 +355,20 @@ func TestConfigInit(t *testing.T) {
 		t.Errorf("failed save: output %q, dev %+v", got, *dev)
 	}
 }
+
+// TestSwitchAllocs presses a wall switch: queueing its command does not
+// allocate.
+func TestSwitchAllocs(t *testing.T) {
+	dev, err := config.Parse(config.Default)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cmds := make(chan bus.Command, 1)
+	allocs := testing.AllocsPerRun(100, func() {
+		Switch(dev, cmds, "A", true, io.Discard)
+		<-cmds
+	})
+	if allocs != 0 {
+		t.Errorf("Switch allocated %v times", allocs)
+	}
+}

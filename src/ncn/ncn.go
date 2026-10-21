@@ -21,12 +21,17 @@ const (
 // can address without U_L_DataOffset.req.
 const maxFrameLen = 64
 
+var errFrameLen = errors.New("ncn: invalid frame length")
+
+// TxBuf holds the request TxData builds.
+type TxBuf [2 * maxFrameLen]byte
+
 // TxData sends buf as a single request so that no gaps open up between the
-// control and data bytes.
-func TxData(w io.Writer, buf []byte) (int, error) {
-	var req [2 * maxFrameLen]byte
+// control and data bytes. The request is built in req, so that sending does
+// not allocate.
+func TxData(w io.Writer, buf []byte, req *TxBuf) (int, error) {
 	if len(buf) < 2 || len(buf) > maxFrameLen {
-		return 0, errors.New("ncn: invalid frame length")
+		return 0, errFrameLen
 	}
 	for i, b := range buf {
 		offset := U_L_DataStartReq
