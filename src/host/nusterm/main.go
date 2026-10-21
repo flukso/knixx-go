@@ -10,7 +10,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"knixx/internal/blescan"
+	"knixx/host/internal/blescan"
 	"os"
 	"sync"
 	"time"

@@ -90,7 +90,7 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
   - The board advertises as `knixx`. Any NUS terminal can connect, such as
     nRF Connect or Serial Bluetooth Terminal, one central at a time.
   - `make nus` connects from a Linux or macOS terminal with the computer's
-    own Bluetooth (`go run ./nusterm` in `src/`). Keys go to the board as
+    own Bluetooth (`go run ./host/nusterm` in `src/`). Keys go to the board as
     on USB, and Ctrl-] quits. `ADDR=` selects a board.
     - **Linux:** it goes through BlueZ, so `bluetoothd` must run; no root
       is needed. `ADDR=` is the MAC address. If every piece of output shows
@@ -205,14 +205,15 @@ Caveats:
 
 ## Code layout
 
-All Go code lives in the `knixx` module in `src/`.
+All Go code lives in the `knixx` module in `src/`. `host/` holds the BLE
+host tools and the packages only they use; the firmware builds none of it.
 
 | package | role |
 |---|---|
 | `nrf` | firmware `main` (TinyGo only): pins, the console, the sensor, ToF, wall switch and LED goroutines, littlefs storage |
 | `ftdi` | host `main`: the shell on an FTDI-attached NCN5121 |
-| `ota` | host `main`: sends a DFU package over BLE to the bootloader, for `make ota` |
-| `nusterm` | host `main`: a terminal on the BLE console, for `make nus` |
+| `host/ota` | host `main`: sends a DFU package over BLE to the bootloader, for `make ota` |
+| `host/nusterm` | host `main`: a terminal on the BLE console, for `make nus` |
 | `bus` | `Run`, the loop that owns the transceiver; the `Command` kinds; the occupancy timer; the sniffer's telegram decoding |
 | `cli` | the console commands shared by both mains, and `Exec` |
 | `config` | ini `Parse`, `Format`, `Get`, `Set` and `Keys`; the embedded `default.ini`; `Load` and `FileStore` for the host |
@@ -228,8 +229,8 @@ All Go code lives in the `knixx` module in `src/`.
 | `internal/sht2x` | SHT2x temperature and humidity sensor driver |
 | `internal/vcnl4040` | VCNL4040 ambient light sensor driver, single measurements |
 | `internal/vl53l7cx` | Go port of ST's VL53L7CX ultra lite driver (ULD) 2.0.1 |
-| `internal/blescan` | finds a BLE peripheral by name or address, for `ota` and `nusterm` |
-| `internal/legacydfu` | the legacy Nordic DFU protocol of the Adafruit bootloader, and reading `adafruit-nrfutil` packages |
+| `host/internal/blescan` | finds a BLE peripheral by name or address, for `ota` and `nusterm` |
+| `host/internal/legacydfu` | the legacy Nordic DFU protocol of the Adafruit bootloader, and reading `adafruit-nrfutil` packages |
 
 `internal/vl53l7cx` holds:
 - **The Go port:** initialisation and firmware upload, the ranging settings,

@@ -7,8 +7,8 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"knixx/internal/blescan"
-	"knixx/internal/legacydfu"
+	"knixx/host/internal/blescan"
+	"knixx/host/internal/legacydfu"
 	"os"
 	"time"
 

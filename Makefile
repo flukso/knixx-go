@@ -23,8 +23,8 @@ HEX      := build/knixx.hex
 DFU      := build/knixx-dfu.zip
 
 # The sources of the firmware, so that the DFU package is only rebuilt when
-# one of them changed.
-FW_SRC := $(shell find src -name '*.go' -o -name '*.ini' -o -name '*.bin') src/go.mod src/go.sum
+# one of them changed. The host tools in src/host are not part of it.
+FW_SRC := $(shell find src -path src/host -prune -o \( -name '*.go' -o -name '*.ini' -o -name '*.bin' \) -print) src/go.mod src/go.sum
 
 # The version embedded in the firmware: the short commit hash, marked -dirty
 # when tracked files differ from it, and the build time in UTC. GIT_REFS
@@ -63,14 +63,15 @@ $(DFU): $(HEX)
 	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --sd-req 0x00B6 --application $(HEX) $(DFU)
 
 # ota waits for a board in BLE DFU mode (run ota on its console) and sends
-# the DFU package over BlueZ. ADDR= selects a board by address.
+# the DFU package over BLE with this computer's Bluetooth. ADDR= selects a
+# board by address.
 ota: $(DFU)
-	cd src && go run ./ota -zip ../$(DFU) $(if $(ADDR),-addr $(ADDR))
+	cd src && go run ./host/ota -zip ../$(DFU) $(if $(ADDR),-addr $(ADDR))
 
 # nus connects a terminal to the BLE console of a board (run nus on on its
 # console) with this computer's Bluetooth. ADDR= selects a board by address.
 nus:
-	cd src && go run ./nusterm $(if $(ADDR),-addr $(ADDR))
+	cd src && go run ./host/nusterm $(if $(ADDR),-addr $(ADDR))
 
 test:
 	cd src && go vet ./... && go test ./...
