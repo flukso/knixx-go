@@ -152,6 +152,12 @@ console commands) or on error paths; `make allocs-update` rewrites the list.
 Calls through an interface are not seen, so the steady-state paths also
 have host tests with `testing.AllocsPerRun`.
 
+**Flashing on macOS.** The UF2 bootloader resets the board as soon as it
+has the whole file, while macOS still writes the drive's file entries, so
+`tinygo flash` reports an I/O error on every flash that worked. `make flash`
+then runs `tools/flashcheck.sh`, which waits for the board's serial port and
+passes when `version` reports the build just flashed.
+
 **Version.** The nrf builds embed the short commit hash, with `-dirty` when
 tracked files differ from it, and the build time in UTC, through `-ldflags
 -X` on `knixx/version`. A commit rebuilds the DFU package even when no
