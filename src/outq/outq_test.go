@@ -60,6 +60,9 @@ func TestDropWhole(t *testing.T) {
 	if got != want {
 		t.Errorf("sent %q...%q, want ...%q", got[:8], got[len(got)-40:], want[len(want)-40:])
 	}
+	if q.Lost() != 11 {
+		t.Errorf("Lost = %d after the note, want 11", q.Lost())
+	}
 	if q.Dropped() != 0 {
 		t.Error("dropped count not cleared by the note")
 	}

@@ -38,7 +38,7 @@ func main() {
 	go runToF(dev, cmds)
 	go runSwitches(dev, cmds)
 
-	runConsole(append(cli.Commands(dev, flashStore{}, cmds), sensorCmd(), tofCmd(dev), nusCmd(), otaCmd(), versionCmd()), log.Bytes())
+	runConsole(append(cli.Commands(dev, flashStore{}, cmds), sensorCmd(), tofCmd(dev), nusCmd(), otaCmd(), versionCmd(), sysCmd()), log.Bytes())
 }
 
 // configureI2C sets up I2C1, which the SHT20 and the VL53L7CX share. I2C0

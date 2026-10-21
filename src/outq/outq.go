@@ -19,8 +19,9 @@ type Queue struct {
 	buf [Len]byte
 	// head counts the bytes sent, tail the bytes queued; both wrap.
 	head, tail uint32
-	// dropped counts the bytes dropped since the last Dropped.
-	dropped uint32
+	// dropped counts the bytes dropped since the last Dropped, lost all
+	// the bytes dropped.
+	dropped, lost uint32
 }
 
 // Free returns the room left.
@@ -37,7 +38,7 @@ func (q *Queue) Buffered() int {
 // output is not cut inside a write. It always reports p as written.
 func (q *Queue) Write(p []byte) (int, error) {
 	if len(p) > q.Free() {
-		q.dropped += uint32(len(p))
+		q.drop(uint32(len(p)))
 		return len(p), nil
 	}
 	q.put(p)
@@ -54,7 +55,7 @@ func (q *Queue) WriteCRLF(p []byte) (int, error) {
 		}
 	}
 	if n > q.Free() {
-		q.dropped += uint32(n)
+		q.drop(uint32(n))
 		return len(p), nil
 	}
 	start := 0
@@ -67,6 +68,11 @@ func (q *Queue) WriteCRLF(p []byte) (int, error) {
 	}
 	q.put(p[start:])
 	return len(p), nil
+}
+
+func (q *Queue) drop(n uint32) {
+	q.dropped += n
+	q.lost += n
 }
 
 func (q *Queue) put(p []byte) {
@@ -103,6 +109,13 @@ func (q *Queue) Dropped() uint32 {
 	n := q.dropped
 	q.dropped = 0
 	return n
+}
+
+// Lost returns the number of bytes dropped since the queue was made. Unlike
+// Dropped it does not clear the count, so that it can be read for a report
+// while the sender uses Dropped.
+func (q *Queue) Lost() uint32 {
+	return q.lost
 }
 
 // Send writes the queued bytes to w, one contiguous part per call of

@@ -81,6 +81,7 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
   | `nus [on\|off]` | show the BLE console state, move the console to BLE NUS or back to USB |
   | `ota` | reboot into the bootloader for a BLE firmware update, see [Over-the-air update](#over-the-air-update) |
   | `version` | the commit and build time of the firmware, also shown in the banner |
+  | `sys` | the uptime, the heap in use, the goroutines, the bytes queued and lost on the USB and BLE console outputs, and whether a USB terminal is open (DTR) |
 
   Use `screen /dev/ttyACM0` or a similar terminal. `tinygo monitor` garbles
   pasted input.
