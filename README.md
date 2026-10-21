@@ -144,7 +144,9 @@ make allocs  # check the firmware's calls that reach the heap against allocs.txt
 **Heap allocations.** The firmware's steady state (the bus, the sniffer,
 the sensor and ToF loops, the wall switches, the console's echo) does not
 allocate, so that the heap does not grow and no GC runs while the board
-works. `make allocs` builds the firmware, disassembles it and lists, with
+works. `make allocs` builds the firmware, disassembles it with LLVM's
+objdump (`llvm-objdump`, a versioned `llvm-objdump-NN` on Debian, plain
+`objdump` on macOS, or `OBJDUMP=`) and lists, with
 `tools/allocs`, every call from the firmware's own code to a function that
 reaches `runtime.alloc`; it fails on a call that is not in `allocs.txt`. The
 accepted calls are outside the steady state (startup, configuration,

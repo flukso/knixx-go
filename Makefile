@@ -89,13 +89,22 @@ test: allocs
 # allocs.txt, so that a change cannot add one unnoticed: the steady state of
 # the firmware should not allocate. allocs-update rewrites allocs.txt, for a
 # call that is accepted: outside the steady state, or on an error path.
+#
+# tools/allocs reads the output of LLVM's objdump, which disassembles any
+# target. It is llvm-objdump in the PATH, else the newest versioned one, as
+# Debian installs it (llvm-objdump-14), else objdump, which is LLVM's on
+# macOS; GNU objdump on Linux only knows the host. OBJDUMP= overrides it.
 ALLOCS_ELF := build/allocs.elf
+LLVM_OBJDUMPS := $(subst :, ,$(PATH))
+LLVM_OBJDUMPS := $(wildcard $(addsuffix /llvm-objdump,$(LLVM_OBJDUMPS))) \
+	$(lastword $(sort $(wildcard $(addsuffix /llvm-objdump-*,$(LLVM_OBJDUMPS)))))
+OBJDUMP ?= $(firstword $(LLVM_OBJDUMPS) objdump)
 
 allocs: $(ALLOCS_ELF)
-	@objdump -d --no-show-raw-insn $(ALLOCS_ELF) | go run tools/allocs/main.go -baseline allocs.txt
+	@$(OBJDUMP) -d --no-show-raw-insn $(ALLOCS_ELF) | go run tools/allocs/main.go -baseline allocs.txt
 
 allocs-update: $(ALLOCS_ELF)
-	@objdump -d --no-show-raw-insn $(ALLOCS_ELF) | go run tools/allocs/main.go -baseline allocs.txt -update
+	@$(OBJDUMP) -d --no-show-raw-insn $(ALLOCS_ELF) | go run tools/allocs/main.go -baseline allocs.txt -update
 
 $(ALLOCS_ELF): $(STAMP) $(FW_SRC) | tinygo-version
 	@mkdir -p build

@@ -81,7 +81,7 @@ func main() {
 		fail(err)
 	}
 	if len(calls) == 0 || calls[alloc] == nil && !called(calls, alloc) {
-		fail(fmt.Errorf("no calls to %s in the disassembly", alloc))
+		fail(fmt.Errorf("no calls to %s in the disassembly; it must come from llvm-objdump", alloc))
 	}
 
 	// allocates holds the functions that reach runtime.alloc.
