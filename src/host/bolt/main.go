@@ -4,7 +4,7 @@
 //
 //	bolt genpkg  build a DFU package from the application's hex file
 //	bolt ota     send a DFU package to the board's bootloader over BLE
-//	bolt term    a terminal on the board's BLE console
+//	bolt term    a terminal on the board's console, over USB or BLE
 //	bolt uf2     flash a UF2 file over USB, through the UF2 bootloader
 //
 // Status messages go to stderr.
@@ -26,7 +26,7 @@ const usage = `usage: bolt <command> [flags]
 commands:
   genpkg  build a DFU package from the application's hex file
   ota     send a DFU package over BLE to the bootloader (run ota on the knixx console)
-  term    a terminal on the BLE console (run nus on on the knixx console)
+  term    a terminal on the console, over USB or BLE (run nus on on the knixx console)
   uf2     flash a UF2 file over USB through the UF2 bootloader
 
 Run bolt <command> -h for the flags of a command.
@@ -104,11 +104,26 @@ func otaCmd(args []string) error {
 // termCmd parses the flags of bolt term and runs it.
 func termCmd(args []string) error {
 	fs := flag.NewFlagSet("bolt term", flag.ExitOnError)
-	name := fs.String("name", "knixx", "advertised name of the board")
-	addr := fs.String("addr", "", "address of the board, instead of matching -name: the MAC address on Linux, the device UUID on macOS")
-	wait := fs.Duration("wait", 30*time.Second, "how long to wait for the board")
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "usage: bolt term [-usb|-ble] [flags]  (default: USB if the board answers there, else BLE)")
+		fs.PrintDefaults()
+	}
+	usb := fs.Bool("usb", false, "the console on the USB serial port")
+	ble := fs.Bool("ble", false, "the console on BLE (run nus on on the knixx console)")
+	port := fs.String("port", "", "USB serial port of the board, instead of finding it; implies -usb")
+	name := fs.String("name", "knixx", "advertised name of the board on BLE")
+	addr := fs.String("addr", "", "BLE address of the board, instead of matching -name: the MAC address on Linux, the device UUID on macOS; implies -ble")
+	wait := fs.Duration("wait", 30*time.Second, "how long to wait for the board on BLE")
 	fs.Parse(args)
-	return runTerm(*name, *addr, *wait)
+	if fs.NArg() != 0 {
+		fs.Usage()
+		os.Exit(2)
+	}
+	mode, err := termMode(*usb, *ble, *port, *addr)
+	if err != nil {
+		return err
+	}
+	return runTerm(mode, *port, *name, *addr, *wait)
 }
 
 // uf2Cmd parses the flags of bolt uf2 and runs it.

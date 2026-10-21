@@ -45,7 +45,7 @@ func runUF2(file, port, volume, expect string, wait time.Duration) error {
 		status("%s is mounted: the board is in its bootloader", mount)
 	} else {
 		if port == "" {
-			if port, err = appPort(); err != nil {
+			if port, err = appPort("double-tap reset for its bootloader, or use -port"); err != nil {
 				return err
 			}
 		}
@@ -93,15 +93,16 @@ func status(format string, a ...any) {
 	fmt.Fprintf(os.Stderr, format+"\n", a...)
 }
 
-// appPort returns the serial port of the one knixx application on USB.
-func appPort() (string, error) {
+// appPort returns the serial port of the one knixx application on USB;
+// hint says what to do when there is none.
+func appPort(hint string) (string, error) {
 	ports, err := usbserial.Ports(appUSBID)
 	if err != nil {
 		return "", err
 	}
 	switch len(ports) {
 	case 0:
-		return "", errors.New("no knixx board on USB; double-tap reset for its bootloader, or use -port")
+		return "", errors.New("no knixx board on USB; " + hint)
 	case 1:
 		return ports[0], nil
 	}

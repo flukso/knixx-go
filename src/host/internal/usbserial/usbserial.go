@@ -1,6 +1,6 @@
 // Package usbserial finds and drives the USB CDC serial port of a board:
-// the 1200 baud touch that resets it into its bootloader, and a console
-// command and its output. It uses termios through golang.org/x/sys/unix,
+// the 1200 baud touch that resets it into its bootloader, a console
+// command and its output, and the raw port for a terminal. It uses termios through golang.org/x/sys/unix,
 // on Linux and macOS.
 package usbserial
 
@@ -60,17 +60,18 @@ func sysfsPorts(root string, vidpid []string) ([]string, error) {
 	return ports, nil
 }
 
-// port is an open serial port.
-type port struct{ f *os.File }
+// Port is an open serial port, read and written as its file, which takes
+// read deadlines.
+type Port struct{ *os.File }
 
-// open opens the serial port name in raw mode at baud. O_NONBLOCK keeps the
+// Open opens the serial port name in raw mode at baud. O_NONBLOCK keeps the
 // open from waiting for carrier and lets reads take a deadline.
-func open(name string, baud int) (*port, error) {
+func Open(name string, baud int) (*Port, error) {
 	f, err := os.OpenFile(name, os.O_RDWR|unix.O_NOCTTY|unix.O_NONBLOCK, 0)
 	if err != nil {
 		return nil, err
 	}
-	p := &port{f}
+	p := &Port{f}
 	if err := p.control(func(fd int) error { return setRaw(fd, baud) }); err != nil {
 		f.Close()
 		return nil, fmt.Errorf("%s: %w", name, err)
@@ -80,8 +81,8 @@ func open(name string, baud int) (*port, error) {
 
 // control runs fn on the file descriptor without taking it out of Go's
 // poller, which f.Fd would.
-func (p *port) control(fn func(fd int) error) error {
-	rc, err := p.f.SyscallConn()
+func (p *Port) control(fn func(fd int) error) error {
+	rc, err := p.SyscallConn()
 	if err != nil {
 		return err
 	}
@@ -92,8 +93,14 @@ func (p *port) control(fn func(fd int) error) error {
 	return ferr
 }
 
+// Exclusive keeps others from opening the port while p is open: their open
+// fails with EBUSY, instead of taking part of the board's output.
+func (p *Port) Exclusive() error {
+	return p.control(func(fd int) error { return unix.IoctlSetInt(fd, unix.TIOCEXCL, 0) })
+}
+
 // clearDTR drops DTR.
-func (p *port) clearDTR() error {
+func (p *Port) clearDTR() error {
 	return p.control(func(fd int) error {
 		return unix.IoctlSetPointerInt(fd, unix.TIOCMBIC, unix.TIOCM_DTR)
 	})
@@ -120,12 +127,12 @@ func Reset1200(name string) error {
 		if try > 0 {
 			time.Sleep(time.Second)
 		}
-		var p *port
-		if p, err = open(name, 1200); err != nil {
+		var p *Port
+		if p, err = Open(name, 1200); err != nil {
 			continue
 		}
 		err = p.clearDTR()
-		p.f.Close()
+		p.Close()
 		if err == nil {
 			return nil
 		}
@@ -140,18 +147,18 @@ var ansi = regexp.MustCompile(`\x1b\[[0-9;?]*[A-Za-z]`)
 // port name at 115200 baud, and returns what came back within wait, with
 // the escape sequences and CRs removed.
 func Query(name, cmd string, wait time.Duration) (string, error) {
-	p, err := open(name, 115200)
+	p, err := Open(name, 115200)
 	if err != nil {
 		return "", err
 	}
-	defer p.f.Close()
+	defer p.Close()
 
 	var out []byte
 	read := func(d time.Duration) error {
-		p.f.SetReadDeadline(time.Now().Add(d))
+		p.SetReadDeadline(time.Now().Add(d))
 		buf := make([]byte, 256)
 		for {
-			n, err := p.f.Read(buf)
+			n, err := p.Read(buf)
 			out = append(out, buf[:n]...)
 			if errors.Is(err, os.ErrDeadlineExceeded) {
 				return nil
@@ -161,13 +168,13 @@ func Query(name, cmd string, wait time.Duration) (string, error) {
 			}
 		}
 	}
-	if _, err := p.f.Write([]byte("\r")); err != nil {
+	if _, err := p.Write([]byte("\r")); err != nil {
 		return "", err
 	}
 	if err := read(300 * time.Millisecond); err != nil {
 		return "", err
 	}
-	if _, err := p.f.Write([]byte(cmd + "\r")); err != nil {
+	if _, err := p.Write([]byte(cmd + "\r")); err != nil {
 		return "", err
 	}
 	if err := read(wait); err != nil {

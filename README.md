@@ -83,18 +83,21 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
   | `version` | the commit and build time of the firmware, also shown in the banner |
   | `sys` | the uptime, the heap in use, the goroutines, the bytes queued and lost on the USB and BLE console outputs, and whether a USB terminal is open (DTR) |
 
-  Use `screen /dev/ttyACM0` on Linux, `screen /dev/cu.usbmodem*` on macOS,
-  or a similar terminal. `tinygo monitor` garbles pasted input. On macOS,
-  the `tty.` and `cu.` names of a port lock each other out: close the
-  terminal before another program, such as `make flash`, opens the port.
+  `make term` connects a terminal to it with `bolt term`: on USB when the
+  board answers there, else on BLE, see below. Keys go to the board as
+  typed, and Ctrl-] quits. `PORT=` selects the USB serial port. The
+  terminal holds the port for itself: `make flash` finds it busy until the
+  terminal quits.
 - **BLE console.** `nus on` moves the console from USB to the Nordic UART
   Service (NUS) on BLE. Holding A on + B off on the wall switches for more
   than 5 s does the same, and A off + B on does `nus off`.
   - The board advertises as `knixx`. Any NUS terminal can connect, such as
     nRF Connect or Serial Bluetooth Terminal, one central at a time.
   - `make nus` connects from a Linux or macOS terminal with the computer's
-    own Bluetooth, with `bolt term`. Keys go to the board as on USB, and
-    Ctrl-] quits. `ADDR=` selects a board.
+    own Bluetooth, with `bolt term -ble`. `make term` does too once the
+    console is on BLE, since the USB port then stays silent, or when the
+    board is not on USB. Keys go to the board as on USB, and Ctrl-] quits.
+    `ADDR=` selects a board.
     - **Linux:** it goes through BlueZ, so `bluetoothd` must run; no root
       is needed. `ADDR=` is the MAC address. If every piece of output shows
       twice, BlueZ is sending each notification twice from stale state it
@@ -133,8 +136,9 @@ Requirements:
   Xcode Command Line Tools;
 - on macOS, a C compiler (the Xcode Command Line Tools) for `bolt`, which
   reaches CoreBluetooth through cgo, and so for `make flash`, `make dfu`,
-  `make ota` and `make nus`;
-- Bluetooth for `make ota` and `make nus`: BlueZ on Linux, or macOS.
+  `make ota`, `make term` and `make nus`;
+- Bluetooth for `make ota` and `make nus`, and for `make term` on BLE:
+  BlueZ on Linux, or macOS.
 
 Optional:
 - libftdi 1.x (found with `pkg-config libftdi1`) and a C compiler, for the
@@ -147,8 +151,9 @@ make nrf     # build build/knixx.uf2
 make flash   # build and flash the Feather over USB with bolt uf2; PORT= picks the serial port
 make dfu     # build the DFU package build/knixx-dfu.zip with bolt genpkg, if the sources changed
 make ota     # build the DFU package if needed and flash it over BLE; ADDR= picks a board
+make term    # a terminal on the console of a board, on USB, else BLE; PORT=, ADDR= pick a board
 make nus     # a terminal on the BLE console of a board; ADDR= picks a board
-make bolt    # build build/bolt, the host tool that make flash, make dfu, make ota and make nus run
+make bolt    # build build/bolt, the host tool that make flash, make dfu, make ota, make term and make nus run
 make test    # make allocs, then go vet and go test ./... on the host
 make allocs  # check the firmware's calls that reach the heap against allocs.txt
 ```
@@ -258,7 +263,7 @@ none of it.
 |---|---|
 | `nrf` | firmware `main` (TinyGo only): pins, the console, the sensor, ToF, wall switch and LED goroutines, littlefs storage |
 | `ftdi` | host `main`: the shell on an FTDI-attached NCN5121 |
-| `host/bolt` | host `main`: `bolt genpkg` builds the DFU package from the hex file, as `adafruit-nrfutil dfu genpkg` does, for `make dfu`; `bolt ota` sends a DFU package over BLE to the bootloader, for `make ota`; `bolt term` is a terminal on the BLE console, for `make nus`; `bolt uf2` flashes a UF2 file over USB, for `make flash` |
+| `host/bolt` | host `main`: `bolt genpkg` builds the DFU package from the hex file, as `adafruit-nrfutil dfu genpkg` does, for `make dfu`; `bolt ota` sends a DFU package over BLE to the bootloader, for `make ota`; `bolt term` is a terminal on the console over USB or BLE, for `make term` and `make nus`; `bolt uf2` flashes a UF2 file over USB, for `make flash` |
 | `bus` | `Run`, the loop that owns the transceiver; the `Command` kinds; the occupancy timer; the sniffer's telegram decoding |
 | `cli` | the console commands shared by both mains, and `Exec` |
 | `config` | ini `Parse`, `Format`, `Get`, `Set` and `Keys`; the embedded `default.ini`; `Load` and `FileStore` for the host |
@@ -277,7 +282,7 @@ none of it.
 | `host/internal/blescan` | finds a BLE peripheral by name or address, for `bolt` |
 | `host/internal/legacydfu` | the legacy Nordic DFU protocol of the Adafruit bootloader, and building, writing and reading the packages of `adafruit-nrfutil dfu genpkg`: Intel HEX to image, init packet, CRC16, zip |
 | `host/internal/uf2` | checks UF2 files and finds or mounts the drive of a UF2 bootloader, for `bolt uf2` |
-| `host/internal/usbserial` | finds USB serial ports by USB ID, the 1200 baud reset into the bootloader and a console query, with termios, for `bolt uf2` |
+| `host/internal/usbserial` | finds USB serial ports by USB ID, the 1200 baud reset into the bootloader, a console query and the raw port, with termios, for `bolt uf2` and `bolt term` |
 
 `internal/vl53l7cx` holds:
 - **The Go port:** initialisation and firmware upload, the ranging settings,

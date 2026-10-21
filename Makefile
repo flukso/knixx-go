@@ -43,7 +43,7 @@ LDFLAGS    := -ldflags "-X knixx/version.Commit=$(GIT_COMMIT) -X knixx/version.D
 # Stacks come from the heap.
 STACK_SIZE := 8KB
 
-.PHONY: nrf flash dfu bolt ota nus test allocs allocs-update tinygo-root tinygo-version clean
+.PHONY: nrf flash dfu bolt ota term nus test allocs allocs-update tinygo-root tinygo-version clean
 
 nrf: $(STAMP) | tinygo-version
 	@mkdir -p build
@@ -69,7 +69,7 @@ $(DFU): $(HEX) | bolt
 	build/bolt genpkg $(HEX) $(DFU)
 
 # bolt is the host tool for a board over USB and, with this computer's
-# Bluetooth, over BLE; flash, ota and nus run it. Go's build cache makes the
+# Bluetooth, over BLE; flash, dfu, ota, term and nus run it. Go's build cache makes the
 # rebuild cheap.
 bolt:
 	@mkdir -p build
@@ -80,10 +80,16 @@ bolt:
 ota: $(DFU) bolt
 	build/bolt ota -zip $(DFU) $(if $(ADDR),-addr $(ADDR))
 
+# term connects a terminal to the console of a board with bolt term: on
+# USB when the board answers there, else on BLE (run nus on on its console).
+# PORT= selects the USB serial port, ADDR= a board on BLE by address.
+term: bolt
+	build/bolt term $(if $(PORT),-port $(PORT)) $(if $(ADDR),-addr $(ADDR))
+
 # nus connects a terminal to the BLE console of a board (run nus on on its
 # console) with bolt term. ADDR= selects a board by address.
 nus: bolt
-	build/bolt term $(if $(ADDR),-addr $(ADDR))
+	build/bolt term -ble $(if $(ADDR),-addr $(ADDR))
 
 # test vets and tests every package on the host. src/ftdi needs libftdi
 # through cgo, so it is left out when pkg-config does not find libftdi1.
