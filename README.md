@@ -499,11 +499,11 @@ config init                 restore and save the built-in default
 
 The renders at the top of this README, and the top and bottom views in
 `pcb/`, are made from the 3D model of the assembled boards with
-`make -C render render STEP=<model.step>`. The model is not in the
-repository. The render tool installs its Python packages (OpenCascade,
-PyVista) in a venv in `render/`.
+`make -C cad render STEP=<model.step>`. The model is not in the
+repository. The tools in `cad/` install their Python packages
+(OpenCascade, PyVista) in a venv there.
 
-`make -C render frontplate STEP=<model.step>` makes the STEP of the front
+`make -C cad frontplate STEP=<model.step>` makes the STEP of the front
 plate, `<model>_frontplate.step`, its outline for cutting,
 `<model>_frontplate.dxf`, and the STEP of the boards with the plate,
 `<model>_assembly.step`, next to the PNGs. The DXF is R12 in mm, made of
@@ -516,7 +516,7 @@ lines, circles and arcs, with the plate's lower-left corner at the origin.
 - **Sensor board:** in the assembly, its underside is moved to 12 mm above
   the main board.
 
-The dimensions are constants at the top of `render/frontplate.py`.
+The dimensions are constants at the top of `cad/frontplate.py`.
 
 ## License
 
