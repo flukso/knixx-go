@@ -5,7 +5,8 @@
 # patches.
 
 TINYGO_VERSION := 0.43.0
-TINYGO_SYSTEM  := /usr/local/lib/tinygo
+# The root of the system install, asked of tinygo only when it is copied.
+TINYGO_SYSTEM   = $(shell env -u TINYGOROOT tinygo env TINYGOROOT)
 PATCHES        := $(sort $(wildcard patches/tinygo-$(TINYGO_VERSION)-*.patch))
 
 ifneq ($(PATCHES),)
@@ -65,8 +66,9 @@ $(HEX): $(STAMP) $(FW_SRC) $(GIT_REFS) | tinygo-version
 $(DFU): $(HEX)
 	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --sd-req 0x00B6 --application $(HEX) $(DFU)
 
-# bolt is the host tool for a board over BLE, with this computer's
-# Bluetooth; ota and nus run it. Go's build cache makes the rebuild cheap.
+# bolt is the host tool for a board over USB and, with this computer's
+# Bluetooth, over BLE; flash, ota and nus run it. Go's build cache makes the
+# rebuild cheap.
 bolt:
 	@mkdir -p build
 	cd src && go build -o ../build/bolt ./host/bolt
@@ -81,8 +83,14 @@ ota: $(DFU) bolt
 nus: bolt
 	build/bolt term $(if $(ADDR),-addr $(ADDR))
 
+# test vets and tests every package on the host. src/ftdi needs libftdi
+# through cgo, so it is left out when pkg-config does not find libftdi1.
+HAVE_LIBFTDI := $(shell pkg-config --exists libftdi1 2>/dev/null && echo yes)
+TEST_PKGS    := ./... $(if $(HAVE_LIBFTDI),,| grep -vx knixx/ftdi)
+
 test: allocs
-	cd src && go vet ./... && go test ./...
+	$(if $(HAVE_LIBFTDI),,@echo "libftdi1 not found: skipping src/ftdi")
+	cd src && pkgs="$$(go list $(TEST_PKGS))" && go vet $$pkgs && go test $$pkgs
 
 # allocs checks the calls by which the firmware's own code reaches the heap,
 # found by tools/allocs in the disassembly of the firmware, against

@@ -83,8 +83,10 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
   | `version` | the commit and build time of the firmware, also shown in the banner |
   | `sys` | the uptime, the heap in use, the goroutines, the bytes queued and lost on the USB and BLE console outputs, and whether a USB terminal is open (DTR) |
 
-  Use `screen /dev/ttyACM0` or a similar terminal. `tinygo monitor` garbles
-  pasted input.
+  Use `screen /dev/ttyACM0` on Linux, `screen /dev/cu.usbmodem*` on macOS,
+  or a similar terminal. `tinygo monitor` garbles pasted input. On macOS,
+  the `tty.` and `cu.` names of a port lock each other out: close the
+  terminal before another program, such as `make flash`, opens the port.
 - **BLE console.** `nus on` moves the console from USB to the Nordic UART
   Service (NUS) on BLE. Holding A on + B off on the wall switches for more
   than 5 s does the same, and A off + B on does `nus off`.
@@ -113,22 +115,35 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
   - The console also goes back to USB after 60 s without a connected
     central, counted from `nus on` or the last disconnect, and on reset,
     since BLE is off at boot.
-- **Host tool.** `src/ftdi` runs the same shell and bus logic on a PC. It
-  drives the NCN5121 through an FTDI USB-serial adapter and uses the ini
-  file given by `-config`, `knixx.ini` by default, or the built-in default
-  when that file does not exist yet; `config set` and `config init` then
-  create it. The `sensor` and `tof` commands, the BLE console and the
-  occupancy input exist only on the nRF.
+- **FTDI host build.** `src/ftdi` runs the same shell and bus logic on a
+  PC. It drives the NCN5121 through an FTDI USB-serial adapter and uses the
+  ini file given by `-config`, `knixx.ini` by default, or the built-in
+  default when that file does not exist yet; `config set` and `config init`
+  then create it. It has the shared commands `switch`, `sniff`, `stat` and
+  `config`; `sensor`, `tof`, `nus`, `ota`, `version` and `sys`, the BLE
+  console and the occupancy input exist only on the nRF.
 
 ## Building and testing
 
 Requirements:
-- TinyGo 0.43.0, installed in `/usr/local/lib/tinygo`;
-- Go for the host build and tests;
-- libftdi for `src/ftdi`;
-- a C compiler, only to regenerate the VL53L7CX golden test log;
-- `adafruit-nrfutil` (`pip install adafruit-nrfutil`) for `make dfu` and
-  `make ota`, and Bluetooth for `make ota`: BlueZ on Linux, or macOS.
+- TinyGo 0.43.0;
+- Go, for `bolt`, the host build and the tests;
+- LLVM's objdump, for `make allocs` and so `make test`: `llvm-objdump` or
+  a versioned `llvm-objdump-NN` on Linux, or on macOS the `objdump` of the
+  Xcode Command Line Tools;
+- on macOS, a C compiler (the Xcode Command Line Tools) for `bolt`, which
+  reaches CoreBluetooth through cgo, and so for `make flash`, `make ota`
+  and `make nus`;
+- `adafruit-nrfutil` (`pip install adafruit-nrfutil`) for `make dfu`, which
+  builds the DFU package and which `make ota` runs first; `bolt ota` then
+  sends the package itself;
+- Bluetooth for `make ota` and `make nus`: BlueZ on Linux, or macOS.
+
+Optional:
+- libftdi 1.x (found with `pkg-config libftdi1`) and a C compiler, for the
+  FTDI host build in `src/ftdi`. Without them `make test` leaves this
+  package out;
+- a C compiler, to regenerate the VL53L7CX golden test log.
 
 ```sh
 make nrf     # build build/knixx.uf2
@@ -171,8 +186,8 @@ user at the machine (polkit), and the user needs access to `/dev/ttyACM*`
 
 **Version.** The nrf builds embed the short commit hash, with `-dirty` when
 tracked files differ from it, and the build time in UTC, through `-ldflags
--X` on `knixx/version`. A commit rebuilds the DFU package even when no
-source changed.
+-X` on `knixx/version`. `make flash` checks it on the board after the
+flash. A commit rebuilds the DFU package even when no source changed.
 
 **Patched TinyGo.** The firmware builds with the system TinyGo install.
 When `patches/` holds patches for its version
@@ -570,5 +585,6 @@ Hardware Licence Version 2 - Permissive, see [pcb/LICENSE](pcb/LICENSE) and
   VL53L7CX ULD. Its licence terms are in the `LICENSE.txt` files there.
 - The firmware blobs in `src/internal/vl53l7cx/firmware/` are extracted from
   it.
-- The Go dependencies are listed in `src/go.mod`: knx-go, goini,
-  ishell, ftdi, TinyGo drivers and tinyfs.
+- The Go dependencies are listed in `src/go.mod`: knx-go, goini, ishell,
+  ftdi, TinyGo drivers, tinyfs and bluetooth, godbus, and golang.org/x/sys
+  and x/term.
