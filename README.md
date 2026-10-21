@@ -132,11 +132,11 @@ Requirements:
 
 ```sh
 make nrf     # build build/knixx.uf2
-make flash   # build and flash the Feather
+make flash   # build and flash the Feather over USB with bolt uf2; PORT= picks the serial port
 make dfu     # build the DFU package build/knixx-dfu.zip, if the sources changed
 make ota     # build the DFU package if needed and flash it over BLE; ADDR= picks a board
 make nus     # a terminal on the BLE console of a board; ADDR= picks a board
-make bolt    # build build/bolt, the BLE host tool that make ota and make nus run
+make bolt    # build build/bolt, the host tool that make flash, make ota and make nus run
 make test    # make allocs, then go vet and go test ./... on the host
 make allocs  # check the firmware's calls that reach the heap against allocs.txt
 ```
@@ -152,11 +152,19 @@ console commands) or on error paths; `make allocs-update` rewrites the list.
 Calls through an interface are not seen, so the steady-state paths also
 have host tests with `testing.AllocsPerRun`.
 
-**Flashing on macOS.** The UF2 bootloader resets the board as soon as it
-has the whole file, while macOS still writes the drive's file entries, so
-`tinygo flash` reports an I/O error on every flash that worked. `make flash`
-then runs `tools/flashcheck.sh`, which waits for the board's serial port and
-passes when `version` reports the build just flashed.
+**Flashing over USB.** `make flash` builds `build/knixx.uf2` with TinyGo and
+flashes it with `bolt uf2`, which carries over the procedure of `tinygo
+flash`: it checks that the file is a complete UF2 file for the nRF52840,
+opens the board's serial port at 1200 baud and drops DTR, which resets the
+board into its UF2 bootloader, waits for the bootloader's `FTHR840BOOT`
+drive and copies the file to it. A board already in its bootloader (after a
+double-tap of reset) is flashed as it is. The bootloader resets the board as
+soon as it has the last block, while the host may still write the drive's
+file entries, so a write error is expected and not trusted either way: the
+flash passes once the board's `version` command prints the build just made.
+On Linux the drive must be automounted (udisks) and the user needs access to
+`/dev/ttyACM*` (the `dialout` group); on macOS the port is the one
+`/dev/cu.usbmodem*`, or `PORT=` when there are several.
 
 **Version.** The nrf builds embed the short commit hash, with `-dirty` when
 tracked files differ from it, and the build time in UTC, through `-ldflags
@@ -226,15 +234,16 @@ Caveats:
 
 ## Code layout
 
-All Go code lives in the `knixx` module in `src/`. `host/` holds the BLE
-host tools and the packages only they use; the firmware builds none of it.
+All Go code lives in the `knixx` module in `src/`. `host/` holds the host
+tools, for BLE and USB, and the packages only they use; the firmware builds
+none of it.
 `tools/allocs` is the standalone build check behind `make allocs`.
 
 | package | role |
 |---|---|
 | `nrf` | firmware `main` (TinyGo only): pins, the console, the sensor, ToF, wall switch and LED goroutines, littlefs storage |
 | `ftdi` | host `main`: the shell on an FTDI-attached NCN5121 |
-| `host/bolt` | host `main`: `bolt ota` sends a DFU package over BLE to the bootloader, for `make ota`; `bolt term` is a terminal on the BLE console, for `make nus` |
+| `host/bolt` | host `main`: `bolt ota` sends a DFU package over BLE to the bootloader, for `make ota`; `bolt term` is a terminal on the BLE console, for `make nus`; `bolt uf2` flashes a UF2 file over USB, for `make flash` |
 | `bus` | `Run`, the loop that owns the transceiver; the `Command` kinds; the occupancy timer; the sniffer's telegram decoding |
 | `cli` | the console commands shared by both mains, and `Exec` |
 | `config` | ini `Parse`, `Format`, `Get`, `Set` and `Keys`; the embedded `default.ini`; `Load` and `FileStore` for the host |
@@ -252,6 +261,8 @@ host tools and the packages only they use; the firmware builds none of it.
 | `internal/vl53l7cx` | Go port of ST's VL53L7CX ultra lite driver (ULD) 2.0.1 |
 | `host/internal/blescan` | finds a BLE peripheral by name or address, for `bolt` |
 | `host/internal/legacydfu` | the legacy Nordic DFU protocol of the Adafruit bootloader, and reading `adafruit-nrfutil` packages |
+| `host/internal/uf2` | checks UF2 files and finds the drive of a UF2 bootloader, for `bolt uf2` |
+| `host/internal/usbserial` | finds USB serial ports by USB ID, the 1200 baud reset into the bootloader and a console query, with termios, for `bolt uf2` |
 
 `internal/vl53l7cx` holds:
 - **The Go port:** initialisation and firmware upload, the ranging settings,

@@ -7,6 +7,7 @@ require (
 	github.com/vapourismo/knx-go v0.0.0-20260813172143-02e535310602
 	github.com/zieckey/goini v0.0.0-20240615065340-08ee21c836fb
 	github.com/ziutek/ftdi v0.0.1
+	golang.org/x/sys v0.42.0
 	golang.org/x/term v0.11.0
 	tinygo.org/x/bluetooth v0.16.0
 	tinygo.org/x/drivers v0.36.0
@@ -33,7 +34,6 @@ require (
 	github.com/tinygo-org/cbgo v0.0.4 // indirect
 	github.com/tinygo-org/pio v0.3.0 // indirect
 	golang.org/x/exp v0.0.0-20260727155853-b88d891fe743 // indirect
-	golang.org/x/sys v0.42.0 // indirect
 	golang.org/x/text v0.19.0 // indirect
 	tinygo.org/x/espradio v0.3.0 // indirect
 )

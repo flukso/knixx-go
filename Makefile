@@ -48,12 +48,11 @@ nrf: $(STAMP) | tinygo-version
 	@mkdir -p build
 	cd src && tinygo build -target=$(TARGET) -stack-size=$(STACK_SIZE) $(LDFLAGS) -size short -o ../$(FIRMWARE) ./nrf
 
-# flash accepts a failed tinygo flash when the board comes back running the
-# new build: on macOS the copy to the UF2 drive reports an I/O error on every
-# flash that worked, see tools/flashcheck.sh.
-flash: $(STAMP) | tinygo-version
-	cd src && tinygo flash -target=$(TARGET) -stack-size=$(STACK_SIZE) $(LDFLAGS) ./nrf || \
-	  $(CURDIR)/tools/flashcheck.sh "version $(GIT_COMMIT) built $(BUILD_DATE)"
+# flash builds the firmware and flashes it over USB with bolt uf2, which
+# resets the board into its UF2 bootloader, copies the file to its drive and
+# passes once the board runs this build. PORT= picks the serial port.
+flash: nrf bolt
+	build/bolt uf2 -expect "version $(GIT_COMMIT) built $(BUILD_DATE)" $(if $(PORT),-port $(PORT)) $(FIRMWARE)
 
 # dfu builds the package for a BLE update of the application with the
 # Adafruit bootloader; 0x00B6 is the firmware id of its S140 6.1.1.
