@@ -1,13 +1,8 @@
-// Command ota flashes a DFU package over BLE to a board whose Adafruit
-// bootloader runs its BLE DFU mode, which the ota console command starts.
-// It uses BlueZ through tinygo.org/x/bluetooth.
 package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
-	"knixx/host/internal/blescan"
 	"knixx/host/internal/legacydfu"
 	"os"
 	"time"
@@ -15,46 +10,26 @@ import (
 	"tinygo.org/x/bluetooth"
 )
 
-func main() {
-	zipPath := flag.String("zip", "../build/knixx-dfu.zip", "DFU package built by make dfu")
-	name := flag.String("name", "AdaDFU", "advertised name of the bootloader")
-	addr := flag.String("addr", "", "address of the bootloader, instead of matching -name")
-	wait := flag.Duration("wait", 60*time.Second, "how long to wait for the bootloader")
-	flag.Parse()
-
-	if err := run(*zipPath, *name, *addr, *wait); err != nil {
-		fmt.Fprintln(os.Stderr, "ota:", err)
-		os.Exit(1)
-	}
-}
-
-func run(zipPath, name, addr string, wait time.Duration) error {
+// runOTA flashes the DFU package at zipPath over BLE to a board whose
+// Adafruit bootloader runs its BLE DFU mode, which the ota console command
+// starts.
+func runOTA(zipPath, name, addr string, wait time.Duration) error {
 	pkg, err := legacydfu.Open(zipPath)
 	if err != nil {
 		return err
 	}
-	adapter := bluetooth.DefaultAdapter
-	if err := adapter.Enable(); err != nil {
-		return fmt.Errorf("bluetooth: %w", err)
-	}
-
-	target := name
-	if addr != "" {
-		target = addr
-	}
-	fmt.Printf("waiting for %s (run ota on the knixx console)...\n", target)
-	found, err := blescan.Find(adapter, name, addr, wait)
+	adapter, found, err := find(name, addr, wait, "ota")
 	if err != nil {
 		return err
 	}
-	fmt.Printf("connecting to %s\n", found.Address)
+	fmt.Fprintf(os.Stderr, "connecting to %s\n", found.Address)
 	dev, err := adapter.Connect(found.Address, bluetooth.ConnectionParams{})
 	if err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
 	defer dev.Disconnect()
 
-	link, err := open(dev)
+	link, err := openDFU(dev)
 	if err != nil {
 		return err
 	}
@@ -63,14 +38,14 @@ func run(zipPath, name, addr string, wait time.Duration) error {
 	err = legacydfu.Update(link, pkg, func(sent, total int) {
 		if pct := sent * 100 / total; pct != shown {
 			shown = pct
-			fmt.Printf("\rsending %d/%d bytes (%d%%)", sent, total, pct)
+			fmt.Fprintf(os.Stderr, "\rsending %d/%d bytes (%d%%)", sent, total, pct)
 		}
 	})
-	fmt.Println()
+	fmt.Fprintln(os.Stderr)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("done in %.0f s, the board restarts with the new firmware\n", time.Since(start).Seconds())
+	fmt.Fprintf(os.Stderr, "done in %.0f s, the board restarts with the new firmware\n", time.Since(start).Seconds())
 	return nil
 }
 
@@ -96,8 +71,8 @@ func (l *link) Notifications() <-chan []byte { return l.notify }
 // PacketSize is the payload of an ATT write with the negotiated MTU.
 func (l *link) PacketSize() int { return max(l.mtu-3, 0) }
 
-// open discovers the DFU service of dev and subscribes to its control point.
-func open(dev bluetooth.Device) (*link, error) {
+// openDFU discovers the DFU service of dev and subscribes to its control point.
+func openDFU(dev bluetooth.Device) (*link, error) {
 	svcUUID, _ := bluetooth.ParseUUID(legacydfu.ServiceUUID)
 	cpUUID, _ := bluetooth.ParseUUID(legacydfu.ControlPointUUID)
 	pktUUID, _ := bluetooth.ParseUUID(legacydfu.PacketUUID)
@@ -132,7 +107,7 @@ func open(dev bluetooth.Device) (*link, error) {
 	// the default size.
 	if mtu, err := l.packet.GetMTU(); err == nil {
 		l.mtu = int(mtu)
-		fmt.Printf("ATT MTU %d\n", mtu)
+		fmt.Fprintf(os.Stderr, "ATT MTU %d\n", mtu)
 	}
 	return l, nil
 }

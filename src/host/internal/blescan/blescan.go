@@ -1,5 +1,5 @@
 // Package blescan finds a BLE peripheral by its advertised name or its
-// address, for the host tools that connect to a board: ota and nusterm.
+// address, for bolt, the host tool that connects to a board.
 package blescan
 
 import (

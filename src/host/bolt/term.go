@@ -1,16 +1,8 @@
-// Command nusterm is a terminal for the BLE console of a knixx board: it
-// connects to the Nordic UART Service (NUS) that the nus on console command
-// starts, with the computer's own Bluetooth adapter. It runs on Linux
-// (BlueZ) and macOS (CoreBluetooth) through tinygo.org/x/bluetooth.
-//
-// Keys go to the board as typed, as on the USB console; Ctrl-] quits.
 package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
-	"knixx/host/internal/blescan"
 	"os"
 	"sync"
 	"time"
@@ -19,30 +11,11 @@ import (
 	"tinygo.org/x/bluetooth"
 )
 
-func main() {
-	name := flag.String("name", "knixx", "advertised name of the board")
-	addr := flag.String("addr", "", "address of the board, instead of matching -name: the MAC address on Linux, the device UUID on macOS")
-	wait := flag.Duration("wait", 30*time.Second, "how long to wait for the board")
-	flag.Parse()
-
-	if err := run(*name, *addr, *wait); err != nil {
-		fmt.Fprintln(os.Stderr, "nusterm:", err)
-		os.Exit(1)
-	}
-}
-
-func run(name, addr string, wait time.Duration) error {
-	adapter := bluetooth.DefaultAdapter
-	if err := adapter.Enable(); err != nil {
-		return fmt.Errorf("bluetooth: %w", err)
-	}
-
-	target := name
-	if addr != "" {
-		target = addr
-	}
-	fmt.Fprintf(os.Stderr, "waiting for %s (run nus on on the knixx console)...\n", target)
-	found, err := blescan.Find(adapter, name, addr, wait)
+// runTerm is a terminal for the BLE console of a knixx board: it connects
+// to the Nordic UART Service (NUS) that the nus on console command starts.
+// Keys go to the board as typed, as on the USB console; Ctrl-] quits.
+func runTerm(name, addr string, wait time.Duration) error {
+	adapter, found, err := find(name, addr, wait, "nus on")
 	if err != nil {
 		return err
 	}
@@ -63,7 +36,7 @@ func run(name, addr string, wait time.Duration) error {
 	}
 	defer dev.Disconnect()
 
-	rx, tx, err := open(dev)
+	rx, tx, err := openNUS(dev)
 	if err != nil {
 		return err
 	}
@@ -137,9 +110,9 @@ func read(input *pending) {
 	}
 }
 
-// open discovers the NUS service of dev and returns its RX characteristic,
+// openNUS discovers the NUS service of dev and returns its RX characteristic,
 // written by the central, and its TX characteristic, notified by the board.
-func open(dev bluetooth.Device) (rx, tx bluetooth.DeviceCharacteristic, err error) {
+func openNUS(dev bluetooth.Device) (rx, tx bluetooth.DeviceCharacteristic, err error) {
 	svcs, err := dev.DiscoverServices([]bluetooth.UUID{bluetooth.ServiceUUIDNordicUART})
 	if err != nil || len(svcs) == 0 {
 		return rx, tx, fmt.Errorf("no NUS service: %v", err)

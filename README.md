@@ -90,8 +90,8 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
   - The board advertises as `knixx`. Any NUS terminal can connect, such as
     nRF Connect or Serial Bluetooth Terminal, one central at a time.
   - `make nus` connects from a Linux or macOS terminal with the computer's
-    own Bluetooth (`go run ./host/nusterm` in `src/`). Keys go to the board as
-    on USB, and Ctrl-] quits. `ADDR=` selects a board.
+    own Bluetooth, with `bolt term`. Keys go to the board as on USB, and
+    Ctrl-] quits. `ADDR=` selects a board.
     - **Linux:** it goes through BlueZ, so `bluetoothd` must run; no root
       is needed. `ADDR=` is the MAC address. If every piece of output shows
       twice, BlueZ is sending each notification twice from stale state it
@@ -134,6 +134,8 @@ make nrf     # build build/knixx.uf2
 make flash   # build and flash the Feather
 make dfu     # build the DFU package build/knixx-dfu.zip, if the sources changed
 make ota     # build the DFU package if needed and flash it over BLE; ADDR= picks a board
+make nus     # a terminal on the BLE console of a board; ADDR= picks a board
+make bolt    # build build/bolt, the BLE host tool that make ota and make nus run
 make test    # go vet and go test ./... on the host
 ```
 
@@ -160,8 +162,8 @@ regenerates two kinds of files:
 
 ### Over-the-air update
 
-1. Run `make ota` on the host. It builds `build/knixx-dfu.zip` if needed,
-   then waits up to 60 s for a bootloader in BLE DFU mode.
+1. Run `make ota` on the host. It builds `build/knixx-dfu.zip` if needed
+   and runs `bolt ota`, which waits up to 60 s for a bootloader in BLE DFU mode.
 2. Type `ota` on the USB console or the BLE console. The firmware writes
    0xA8 to GPREGRET and resets. If the SoftDevice runs after `nus on`, the
    write goes through the SoftDevice. The Adafruit bootloader then starts its
@@ -212,8 +214,7 @@ host tools and the packages only they use; the firmware builds none of it.
 |---|---|
 | `nrf` | firmware `main` (TinyGo only): pins, the console, the sensor, ToF, wall switch and LED goroutines, littlefs storage |
 | `ftdi` | host `main`: the shell on an FTDI-attached NCN5121 |
-| `host/ota` | host `main`: sends a DFU package over BLE to the bootloader, for `make ota` |
-| `host/nusterm` | host `main`: a terminal on the BLE console, for `make nus` |
+| `host/bolt` | host `main`: `bolt ota` sends a DFU package over BLE to the bootloader, for `make ota`; `bolt term` is a terminal on the BLE console, for `make nus` |
 | `bus` | `Run`, the loop that owns the transceiver; the `Command` kinds; the occupancy timer; the sniffer's telegram decoding |
 | `cli` | the console commands shared by both mains, and `Exec` |
 | `config` | ini `Parse`, `Format`, `Get`, `Set` and `Keys`; the embedded `default.ini`; `Load` and `FileStore` for the host |
@@ -229,7 +230,7 @@ host tools and the packages only they use; the firmware builds none of it.
 | `internal/sht2x` | SHT2x temperature and humidity sensor driver |
 | `internal/vcnl4040` | VCNL4040 ambient light sensor driver, single measurements |
 | `internal/vl53l7cx` | Go port of ST's VL53L7CX ultra lite driver (ULD) 2.0.1 |
-| `host/internal/blescan` | finds a BLE peripheral by name or address, for `ota` and `nusterm` |
+| `host/internal/blescan` | finds a BLE peripheral by name or address, for `bolt` |
 | `host/internal/legacydfu` | the legacy Nordic DFU protocol of the Adafruit bootloader, and reading `adafruit-nrfutil` packages |
 
 `internal/vl53l7cx` holds:

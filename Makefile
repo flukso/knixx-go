@@ -42,7 +42,7 @@ LDFLAGS    := -ldflags "-X knixx/version.Commit=$(GIT_COMMIT) -X knixx/version.D
 # Stacks come from the heap.
 STACK_SIZE := 8KB
 
-.PHONY: nrf flash dfu ota nus test tinygo-root tinygo-version clean
+.PHONY: nrf flash dfu bolt ota nus test tinygo-root tinygo-version clean
 
 nrf: $(STAMP) | tinygo-version
 	@mkdir -p build
@@ -62,16 +62,21 @@ $(HEX): $(STAMP) $(FW_SRC) $(GIT_REFS) | tinygo-version
 $(DFU): $(HEX)
 	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --sd-req 0x00B6 --application $(HEX) $(DFU)
 
+# bolt is the host tool for a board over BLE, with this computer's
+# Bluetooth; ota and nus run it. Go's build cache makes the rebuild cheap.
+bolt:
+	@mkdir -p build
+	cd src && go build -o ../build/bolt ./host/bolt
+
 # ota waits for a board in BLE DFU mode (run ota on its console) and sends
-# the DFU package over BLE with this computer's Bluetooth. ADDR= selects a
-# board by address.
-ota: $(DFU)
-	cd src && go run ./host/ota -zip ../$(DFU) $(if $(ADDR),-addr $(ADDR))
+# the DFU package with bolt ota. ADDR= selects a board by address.
+ota: $(DFU) bolt
+	build/bolt ota -zip $(DFU) $(if $(ADDR),-addr $(ADDR))
 
 # nus connects a terminal to the BLE console of a board (run nus on on its
-# console) with this computer's Bluetooth. ADDR= selects a board by address.
-nus:
-	cd src && go run ./host/nusterm $(if $(ADDR),-addr $(ADDR))
+# console) with bolt term. ADDR= selects a board by address.
+nus: bolt
+	build/bolt term $(if $(ADDR),-addr $(ADDR))
 
 test:
 	cd src && go vet ./... && go test ./...
