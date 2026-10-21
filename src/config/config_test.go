@@ -62,8 +62,22 @@ func TestLoadErrors(t *testing.T) {
 			t.Errorf("%s: expected an error", name)
 		}
 	}
-	if _, err := Load(filepath.Join(t.TempDir(), "absent.ini")); err == nil {
-		t.Error("absent file: expected an error")
+	if _, err := Load(t.TempDir()); err == nil {
+		t.Error("unreadable file: expected an error")
+	}
+}
+
+func TestLoadAbsent(t *testing.T) {
+	got, err := Load(filepath.Join(t.TempDir(), "absent.ini"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := Parse(Default)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *got != *want {
+		t.Errorf("absent file: got %+v, want the default %+v", got, want)
 	}
 }
 

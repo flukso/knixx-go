@@ -3,14 +3,20 @@
 package config
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
 	"knixx/thunder"
 	"os"
 )
 
-// Load parses the ini file at path.
+// Load parses the ini file at path, or the built-in Default when there is
+// no file there yet. A file that cannot be read or parsed is an error.
 func Load(path string) (*thunder.Device, error) {
 	data, err := os.ReadFile(path)
+	if errors.Is(err, fs.ErrNotExist) {
+		data, err = Default, nil
+	}
 	if err != nil {
 		return nil, fmt.Errorf("config: %w", err)
 	}

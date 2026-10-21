@@ -114,8 +114,10 @@ KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
     since BLE is off at boot.
 - **Host tool.** `src/ftdi` runs the same shell and bus logic on a PC. It
   drives the NCN5121 through an FTDI USB-serial adapter and uses the ini
-  file given by `-config`, `knixx.ini` by default. The `sensor` and `tof`
-  commands, the BLE console and the occupancy input exist only on the nRF.
+  file given by `-config`, `knixx.ini` by default, or the built-in default
+  when that file does not exist yet; `config set` and `config init` then
+  create it. The `sensor` and `tof` commands, the BLE console and the
+  occupancy input exist only on the nRF.
 
 ## Building and testing
 
