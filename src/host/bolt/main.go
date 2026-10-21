@@ -2,9 +2,10 @@
 // computer's own Bluetooth adapter through tinygo.org/x/bluetooth (BlueZ on
 // Linux, CoreBluetooth on macOS) and over USB. Its subcommands:
 //
-//	bolt ota   send a DFU package to the board's bootloader over BLE
-//	bolt term  a terminal on the board's BLE console
-//	bolt uf2   flash a UF2 file over USB, through the UF2 bootloader
+//	bolt genpkg  build a DFU package from the application's hex file
+//	bolt ota     send a DFU package to the board's bootloader over BLE
+//	bolt term    a terminal on the board's BLE console
+//	bolt uf2     flash a UF2 file over USB, through the UF2 bootloader
 //
 // Status messages go to stderr.
 package main
@@ -13,6 +14,7 @@ import (
 	"flag"
 	"fmt"
 	"knixx/host/internal/blescan"
+	"knixx/host/internal/legacydfu"
 	"os"
 	"time"
 
@@ -22,9 +24,10 @@ import (
 const usage = `usage: bolt <command> [flags]
 
 commands:
-  ota   send a DFU package over BLE to the bootloader (run ota on the knixx console)
-  term  a terminal on the BLE console (run nus on on the knixx console)
-  uf2   flash a UF2 file over USB through the UF2 bootloader
+  genpkg  build a DFU package from the application's hex file
+  ota     send a DFU package over BLE to the bootloader (run ota on the knixx console)
+  term    a terminal on the BLE console (run nus on on the knixx console)
+  uf2     flash a UF2 file over USB through the UF2 bootloader
 
 Run bolt <command> -h for the flags of a command.
 `
@@ -37,6 +40,8 @@ func main() {
 	cmd, args := os.Args[1], os.Args[2:]
 	var err error
 	switch cmd {
+	case "genpkg":
+		err = genpkgCmd(args)
 	case "ota":
 		err = otaCmd(args)
 	case "term":
@@ -54,6 +59,35 @@ func main() {
 		fmt.Fprintf(os.Stderr, "bolt %s: %v\n", cmd, err)
 		os.Exit(1)
 	}
+}
+
+// genpkgCmd parses the flags of bolt genpkg and runs it. The defaults are
+// those of the Adafruit bootloader of the Feather nRF52840: device type
+// 0x0052 and the firmware id 0x00B6 of its S140 6.1.1.
+func genpkgCmd(args []string) error {
+	fs := flag.NewFlagSet("bolt genpkg", flag.ExitOnError)
+	fs.Usage = func() {
+		fmt.Fprintln(fs.Output(), "usage: bolt genpkg [flags] <app.hex> <package.zip>")
+		fs.PrintDefaults()
+	}
+	devType := fs.Uint("dev-type", 0x0052, "device type of the init packet")
+	devRev := fs.Uint("dev-rev", 0xFFFF, "device revision of the init packet")
+	appVer := fs.Uint("app-ver", 0xFFFFFFFF, "application version of the init packet")
+	sdReq := fs.String("sd-req", "0x00B6", "comma separated SoftDevice firmware ids the application runs on")
+	fs.Parse(args)
+	if fs.NArg() != 2 {
+		fs.Usage()
+		os.Exit(2)
+	}
+	if *devType > 0xFFFF || *devRev > 0xFFFF || *appVer > 0xFFFFFFFF {
+		return fmt.Errorf("-dev-type and -dev-rev take 16 bits, -app-ver 32")
+	}
+	sds, err := parseIDs(*sdReq)
+	if err != nil {
+		return fmt.Errorf("-sd-req: %w", err)
+	}
+	ip := legacydfu.InitPacket{DevType: uint16(*devType), DevRev: uint16(*devRev), AppVer: uint32(*appVer), SDReq: sds}
+	return runGenpkg(fs.Arg(0), fs.Arg(1), ip)
 }
 
 // otaCmd parses the flags of bolt ota and runs it.

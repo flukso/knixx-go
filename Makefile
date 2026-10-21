@@ -56,15 +56,17 @@ flash: nrf bolt
 	build/bolt uf2 -expect "version $(GIT_COMMIT) built $(BUILD_DATE)" $(if $(PORT),-port $(PORT)) $(FIRMWARE)
 
 # dfu builds the package for a BLE update of the application with the
-# Adafruit bootloader; 0x00B6 is the firmware id of its S140 6.1.1.
+# Adafruit bootloader, with bolt genpkg.
 dfu: $(DFU)
 
 $(HEX): $(STAMP) $(FW_SRC) $(GIT_REFS) | tinygo-version
 	@mkdir -p build
 	cd src && tinygo build -target=$(TARGET) -stack-size=$(STACK_SIZE) $(LDFLAGS) -o ../$(HEX) ./nrf
 
-$(DFU): $(HEX)
-	adafruit-nrfutil dfu genpkg --dev-type 0x0052 --sd-req 0x00B6 --application $(HEX) $(DFU)
+# bolt is order-only: it is rebuilt, but the package only when the hex
+# changed.
+$(DFU): $(HEX) | bolt
+	build/bolt genpkg $(HEX) $(DFU)
 
 # bolt is the host tool for a board over USB and, with this computer's
 # Bluetooth, over BLE; flash, ota and nus run it. Go's build cache makes the

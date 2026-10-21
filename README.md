@@ -132,11 +132,8 @@ Requirements:
   a versioned `llvm-objdump-NN` on Linux, or on macOS the `objdump` of the
   Xcode Command Line Tools;
 - on macOS, a C compiler (the Xcode Command Line Tools) for `bolt`, which
-  reaches CoreBluetooth through cgo, and so for `make flash`, `make ota`
-  and `make nus`;
-- `adafruit-nrfutil` (`pip install adafruit-nrfutil`) for `make dfu`, which
-  builds the DFU package and which `make ota` runs first; `bolt ota` then
-  sends the package itself;
+  reaches CoreBluetooth through cgo, and so for `make flash`, `make dfu`,
+  `make ota` and `make nus`;
 - Bluetooth for `make ota` and `make nus`: BlueZ on Linux, or macOS.
 
 Optional:
@@ -148,10 +145,10 @@ Optional:
 ```sh
 make nrf     # build build/knixx.uf2
 make flash   # build and flash the Feather over USB with bolt uf2; PORT= picks the serial port
-make dfu     # build the DFU package build/knixx-dfu.zip, if the sources changed
+make dfu     # build the DFU package build/knixx-dfu.zip with bolt genpkg, if the sources changed
 make ota     # build the DFU package if needed and flash it over BLE; ADDR= picks a board
 make nus     # a terminal on the BLE console of a board; ADDR= picks a board
-make bolt    # build build/bolt, the host tool that make flash, make ota and make nus run
+make bolt    # build build/bolt, the host tool that make flash, make dfu, make ota and make nus run
 make test    # make allocs, then go vet and go test ./... on the host
 make allocs  # check the firmware's calls that reach the heap against allocs.txt
 ```
@@ -207,8 +204,8 @@ regenerates two kinds of files:
 
 ### Over-the-air update
 
-1. Run `make ota` on the host. It builds `build/knixx-dfu.zip` if needed
-   and runs `bolt ota`, which waits up to 60 s for a bootloader in BLE DFU mode.
+1. Run `make ota` on the host. It builds `build/knixx-dfu.zip` with
+   `bolt genpkg` if needed and runs `bolt ota`, which waits up to 60 s for a bootloader in BLE DFU mode.
 2. Type `ota` on the USB console or the BLE console. The firmware writes
    0xA8 to GPREGRET and resets. If the SoftDevice runs after `nus on`, the
    write goes through the SoftDevice. The Adafruit bootloader then starts its
@@ -261,7 +258,7 @@ none of it.
 |---|---|
 | `nrf` | firmware `main` (TinyGo only): pins, the console, the sensor, ToF, wall switch and LED goroutines, littlefs storage |
 | `ftdi` | host `main`: the shell on an FTDI-attached NCN5121 |
-| `host/bolt` | host `main`: `bolt ota` sends a DFU package over BLE to the bootloader, for `make ota`; `bolt term` is a terminal on the BLE console, for `make nus`; `bolt uf2` flashes a UF2 file over USB, for `make flash` |
+| `host/bolt` | host `main`: `bolt genpkg` builds the DFU package from the hex file, as `adafruit-nrfutil dfu genpkg` does, for `make dfu`; `bolt ota` sends a DFU package over BLE to the bootloader, for `make ota`; `bolt term` is a terminal on the BLE console, for `make nus`; `bolt uf2` flashes a UF2 file over USB, for `make flash` |
 | `bus` | `Run`, the loop that owns the transceiver; the `Command` kinds; the occupancy timer; the sniffer's telegram decoding |
 | `cli` | the console commands shared by both mains, and `Exec` |
 | `config` | ini `Parse`, `Format`, `Get`, `Set` and `Keys`; the embedded `default.ini`; `Load` and `FileStore` for the host |
@@ -278,7 +275,7 @@ none of it.
 | `internal/vcnl4040` | VCNL4040 ambient light sensor driver, single measurements |
 | `internal/vl53l7cx` | Go port of ST's VL53L7CX ultra lite driver (ULD) 2.0.1 |
 | `host/internal/blescan` | finds a BLE peripheral by name or address, for `bolt` |
-| `host/internal/legacydfu` | the legacy Nordic DFU protocol of the Adafruit bootloader, and reading `adafruit-nrfutil` packages |
+| `host/internal/legacydfu` | the legacy Nordic DFU protocol of the Adafruit bootloader, and building, writing and reading the packages of `adafruit-nrfutil dfu genpkg`: Intel HEX to image, init packet, CRC16, zip |
 | `host/internal/uf2` | checks UF2 files and finds or mounts the drive of a UF2 bootloader, for `bolt uf2` |
 | `host/internal/usbserial` | finds USB serial ports by USB ID, the 1200 baud reset into the bootloader and a console query, with termios, for `bolt uf2` |
 

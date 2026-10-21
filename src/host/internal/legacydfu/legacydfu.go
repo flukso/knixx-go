@@ -1,7 +1,8 @@
 // Package legacydfu updates the application of a Nordic SDK 11 bootloader,
 // such as the Adafruit nRF52 bootloader, over BLE with the legacy DFU
-// protocol. The transport is abstracted by Link; Open reads the packages
-// that adafruit-nrfutil dfu genpkg builds.
+// protocol. The transport is abstracted by Link. The packages are those of
+// adafruit-nrfutil dfu genpkg: NewPackage builds one from an image, which
+// ReadHex makes from a hex file, WriteZip writes it and Open reads it.
 package legacydfu
 
 import (
