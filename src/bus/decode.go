@@ -1,12 +1,9 @@
 package bus
 
 import (
-	"fmt"
 	"knixx/thunder"
 	"knixx/tp1"
-	"strings"
 
-	"github.com/vapourismo/knx-go/knx/cemi"
 	"github.com/vapourismo/knx-go/knx/dpt"
 )
 
@@ -25,27 +22,25 @@ const (
 	dptConflict
 )
 
-// value is a datapoint type that decodes a group value.
-type value interface {
-	Unpack(data []byte) error
-	String() string
-}
+// maxF16 is the upper bound of the DPT 9 types, in hundredths.
+const maxF16 = 670760_00
 
-// id returns the DPT ID of k and a value of its type to unpack into.
-func (k dptKind) id() (string, value) {
+// id returns the DPT ID of k. A DPT 9 type also gets the unit of its values
+// and their lower bound in hundredths.
+func (k dptKind) id() (id, unit string, min int32) {
 	switch k {
 	case dpt1001:
-		return "1.001", new(dpt.DPT_1001)
+		return "1.001", "", 0
 	case dpt1018:
-		return "1.018", new(dpt.DPT_1018)
+		return "1.018", "", 0
 	case dpt9001:
-		return "9.001", new(dpt.DPT_9001)
+		return "9.001", " °C", -273_00
 	case dpt9004:
-		return "9.004", new(dpt.DPT_9004)
+		return "9.004", " lux", 0
 	case dpt9007:
-		return "9.007", new(dpt.DPT_9007)
+		return "9.007", " %", 0
 	}
-	return "", nil
+	return "", "", 0
 }
 
 // bound is a group bound in the configuration.
@@ -71,6 +66,11 @@ type decoder struct {
 	// lines holds the type of each main/middle group, indexed by the high
 	// octet of the group address.
 	lines [256]dptKind
+
+	// tg, with payload for its data, is where a frame is unpacked, so that
+	// rendering it does not allocate.
+	tg      tp1.Telegram
+	payload [tp1.MaxPayload]byte
 }
 
 // reset drops the tables, for a change of dev.
@@ -108,60 +108,68 @@ func (d *decoder) build() {
 	d.valid = true
 }
 
-// describe renders a frame from the bus: the source and destination, the
-// service with its data, the datapoint type and value of a group, and the
-// priority and routing counter.
-func (d *decoder) describe(frame []byte) string {
-	var tg tp1.Telegram
+// appendFrame appends the rendering of a frame from the bus to dst: the
+// source and destination, the service with its data, the datapoint type and
+// value of a group, and the priority and routing counter. It does not
+// allocate while dst has room.
+func (d *decoder) appendFrame(dst, frame []byte) []byte {
+	dst = append(dst, "L_Data.ind: "...)
+	tg := &d.tg
+	tg.Data = d.payload[:0]
 	if err := tg.Unpack(frame); err != nil {
-		return "L_Data.ind: " + err.Error()
+		return append(dst, err.Error()...)
 	}
 
-	var b strings.Builder
-	fmt.Fprintf(&b, "L_Data.ind: %v > ", cemi.IndividualAddr(tg.Src))
+	dst = appendIndividualAddr(dst, tg.Src)
+	dst = append(dst, " > "...)
 	if tg.AddrType == tp1.AddrGroup {
-		b.WriteString(cemi.GroupAddr(tg.Dest).String())
+		dst = appendGroupAddr(dst, tg.Dest)
 	} else {
-		b.WriteString(cemi.IndividualAddr(tg.Dest).String())
+		dst = appendIndividualAddr(dst, tg.Dest)
 	}
-	fmt.Fprintf(&b, " %v", tg.Apci)
+	dst = append(dst, ' ')
+	dst = append(dst, tg.Apci.String()...)
 	groupValue := tg.Apci == tp1.GroupValueWrite || tg.Apci == tp1.GroupValueResponse
 	switch {
 	case tg.Apci == tp1.GroupValueRead || len(tg.Data) == 0:
 	case groupValue && len(tg.Data) == 1:
 		// A value of up to 6 bits, in the APCI octet.
-		fmt.Fprintf(&b, " $%02x", tg.Data[0])
+		dst = append(dst, " $"...)
+		dst = appendHex2(dst, tg.Data[0])
 	case groupValue:
 		// A longer value follows the APCI octet.
-		fmt.Fprintf(&b, " % x", tg.Data[1:])
+		dst = appendHexBytes(append(dst, ' '), tg.Data[1:])
 	default:
-		fmt.Fprintf(&b, " % x", tg.Data)
+		dst = appendHexBytes(append(dst, ' '), tg.Data)
 	}
-	if v := d.value(&tg); v != "" {
-		b.WriteString(" (" + v + ")")
-	}
-	fmt.Fprintf(&b, ", %v priority, routing %d", tg.Priority, tg.Routing)
+	dst = d.appendValue(dst, tg)
+	dst = append(dst, ", "...)
+	dst = append(dst, tg.Priority.String()...)
+	dst = append(dst, " priority, routing "...)
+	dst = appendDec(dst, uint64(tg.Routing))
 	if tg.Transport == tp1.NumberedDataPacket {
-		fmt.Fprintf(&b, ", sequence %d", tg.Sequence)
+		dst = append(dst, ", sequence "...)
+		dst = appendDec(dst, uint64(tg.Sequence))
 	}
 	if tg.Repeat {
-		b.WriteString(", repeated")
+		dst = append(dst, ", repeated"...)
 	}
-	return b.String()
+	return dst
 }
 
-// value describes the datapoint type of the group a telegram is sent to,
-// followed by the value of a group value write or response:
+// appendValue appends, in parentheses, the datapoint type of the group a
+// telegram is sent to, followed by the value of a group value write or
+// response:
 //   - a bound group with its binding, e.g. "A, DPT 1.001: On";
 //   - a group on the main/middle group of bindings of one type with that
 //     type, e.g. "DPT 9.001: 21.00 °C". A value that does not unpack shows
-//     that the group is of another type; nothing is returned then.
+//     that the group is of another type; nothing is appended then.
 //
-// It returns "" for any other group, for 0/0/0 and for an individual
+// It appends nothing for any other group, for 0/0/0 and for an individual
 // address.
-func (d *decoder) value(tg *tp1.Telegram) string {
+func (d *decoder) appendValue(dst []byte, tg *tp1.Telegram) []byte {
 	if tg.AddrType != tp1.AddrGroup || tg.Dest == 0 {
-		return ""
+		return dst
 	}
 	if !d.valid {
 		d.build()
@@ -176,22 +184,49 @@ func (d *decoder) value(tg *tp1.Telegram) string {
 	if kind == dptNone {
 		kind = d.lines[tg.Dest>>8]
 	}
-	id, v := kind.id()
-	if v == nil {
-		return ""
+	id, unit, min := kind.id()
+	if id == "" {
+		return dst
 	}
-	s := "DPT " + id
+	start := len(dst)
+	dst = append(dst, " ("...)
 	if name != "" {
-		s = name + ", " + s
+		dst = append(dst, name...)
+		dst = append(dst, ", "...)
 	}
+	dst = append(dst, "DPT "...)
+	dst = append(dst, id...)
 	if tg.Apci != tp1.GroupValueWrite && tg.Apci != tp1.GroupValueResponse {
-		return s
+		return append(dst, ')')
 	}
-	if v.Unpack(tg.Data) != nil {
-		if name == "" {
-			return ""
+	// The value, if it has the length and range of the type.
+	var text string
+	h, ok := int32(0), false
+	switch kind {
+	case dpt1001, dpt1018:
+		ok = len(tg.Data) == 1
+		on := ok && tg.Data[0]&1 == 1
+		if kind == dpt1001 {
+			text = dpt.DPT_1001(on).String()
+		} else {
+			text = dpt.DPT_1018(on).String()
 		}
-		return s
+	default:
+		h, ok = f16(tg.Data)
+		ok = ok && h >= min && h <= maxF16
 	}
-	return s + ": " + v.String()
+	if !ok {
+		if name == "" {
+			return dst[:start]
+		}
+		return append(dst, ')')
+	}
+	dst = append(dst, ": "...)
+	if text != "" {
+		dst = append(dst, text...)
+	} else {
+		dst = appendHundredths(dst, h)
+		dst = append(dst, unit...)
+	}
+	return append(dst, ')')
 }

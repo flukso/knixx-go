@@ -1,6 +1,8 @@
 package bus
 
 import (
+	"fmt"
+	"io"
 	"knixx/thunder"
 	"knixx/tp1"
 	"strings"
@@ -27,6 +29,11 @@ func decodeDevice() *thunder.Device {
 func describe(dev *thunder.Device, frame []byte) string {
 	d := decoder{dev: dev}
 	return d.describe(frame)
+}
+
+// describe renders frame into a new string.
+func (d *decoder) describe(frame []byte) string {
+	return string(d.appendFrame(nil, frame))
 }
 
 // frameOf packs a telegram from 1.1.5 to dest with service apci and data.
@@ -202,5 +209,103 @@ func TestSniffDecodeConfig(t *testing.T) {
 		if !strings.Contains(got, want) {
 			t.Errorf("output %q lacks %q", got, want)
 		}
+	}
+}
+
+// TestSniffAllocs feeds the receiver frames and service indications while
+// sniffing: rendering them must not allocate.
+func TestSniffAllocs(t *testing.T) {
+	defer Sniff.Store(false)
+	Sniff.Store(true)
+	prev := Out
+	Out = io.Discard
+	defer func() { Out = prev }()
+
+	dev := decodeDevice()
+	var in []byte
+	for _, f := range [][]byte{
+		frameOf(t, ga(0, 0, 2), tp1.GroupValueWrite, dpt.DPT_1001(true).Pack(), nil),
+		frameOf(t, ga(2, 0, 1), tp1.GroupValueWrite, dpt.DPT_9001(-12.5).Pack(), nil),
+		frameOf(t, ga(2, 0, 9), tp1.GroupValueResponse, dpt.DPT_9001(21).Pack(), nil),
+		frameOf(t, ga(3, 0, 1), tp1.GroupValueWrite, []byte{0, 0x87, 0xce}, nil), // out of range
+		frameOf(t, ga(0, 0, 2), tp1.GroupValueRead, nil, nil),
+		frameOf(t, ga(1, 1, 9), tp1.GroupValueWrite, []byte{0, 0x12, 0x34}, nil),
+		frameOf(t, 0x7801, tp1.MemoryRead, []byte{0x03, 0x00, 0x60}, func(tg *tp1.Telegram) {
+			tg.AddrType = tp1.AddrIndividual
+		}),
+	} {
+		in = append(in, f...)
+	}
+	in = append(in, 0x13, 0x8b, 0x0b, 0x17, 0x4b, 0xfb, 0x03)
+	r := receiver{dec: decoder{dev: dev}}
+	allocs := testing.AllocsPerRun(100, func() { r.handle(in) })
+	if allocs != 0 {
+		t.Errorf("handle allocated %v times", allocs)
+	}
+}
+
+// hundredths renders the DPT 9 value in data.
+func hundredths(data []byte) string {
+	h, ok := f16(data)
+	if !ok {
+		return "bad length"
+	}
+	return string(appendHundredths(nil, h))
+}
+
+func TestAppendF16(t *testing.T) {
+	tests := []struct {
+		data []byte
+		want string
+	}{
+		{[]byte{0, 0x0c, 0x1a}, "21.00"},
+		{[]byte{0, 0x00, 0x00}, "0.00"},
+		{[]byte{0, 0x87, 0xce}, "-0.50"},
+		{[]byte{0, 0x7f, 0xff}, "670760.96"},  // the largest value
+		{[]byte{0, 0xf8, 0x00}, "-671088.64"}, // the smallest value
+	}
+	for _, tt := range tests {
+		if got := hundredths(tt.data); got != tt.want {
+			t.Errorf("f16(% x) = %q, want %q", tt.data, got, tt.want)
+		}
+	}
+}
+
+// TestAppendF16Fmt checks f16 and appendHundredths against the %.2f of the float32 that dpt
+// unpacks, for every value small enough for float32 to hold its hundredths.
+func TestAppendF16Fmt(t *testing.T) {
+	for i := 0; i < 1<<16; i++ {
+		data := []byte{0, byte(i >> 8), byte(i)}
+		var v float32
+		var x dpt.DPT_9002 // the widest range of DPT 9
+		if x.Unpack(data) != nil {
+			continue
+		}
+		v = float32(x)
+		if v >= 10000 || v <= -10000 {
+			continue
+		}
+		if got, want := hundredths(data), fmt.Sprintf("%.2f", v); got != want {
+			t.Errorf("f16(% x) = %q, fmt %q", data, got, want)
+		}
+	}
+}
+
+// TestDecodeOutOfRange shows a value outside the range of its type as for a
+// group of another type: the binding without a value, or nothing.
+func TestDecodeOutOfRange(t *testing.T) {
+	dev := decodeDevice()
+	neg := []byte{0, 0x87, 0xce} // -0.50
+	frame := frameOf(t, ga(3, 0, 1), tp1.GroupValueWrite, neg, nil)
+	if got := describe(dev, frame); !strings.Contains(got, "(humidity, DPT 9.007), low") {
+		t.Errorf("bound: %q", got)
+	}
+	frame = frameOf(t, ga(3, 0, 9), tp1.GroupValueWrite, neg, nil)
+	if got := describe(dev, frame); strings.Contains(got, "DPT") {
+		t.Errorf("unbound: %q", got)
+	}
+	frame = frameOf(t, ga(2, 0, 9), tp1.GroupValueWrite, neg, nil)
+	if got := describe(dev, frame); !strings.Contains(got, "(DPT 9.001: -0.50 °C)") {
+		t.Errorf("temperature: %q", got)
 	}
 }

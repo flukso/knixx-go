@@ -133,6 +133,9 @@ type receiver struct {
 	stat, gotState, gotSystemStat bool
 	// gotCon records an L_Data.con and conPositive its outcome.
 	gotCon, conPositive bool
+	// line is where a line of the trace is rendered: one Write each, without
+	// allocating. 256 bytes hold the longest frame with room to spare.
+	line [256]byte
 }
 
 // handle reports the services data contains. Frames are decoded only while
@@ -142,7 +145,8 @@ func (r *receiver) handle(data []byte) {
 		s, v := r.parser.Feed(b)
 		if s == ncn.L_DataInd {
 			if Sniff.Load() {
-				fmt.Fprintf(Out, "  %s\n", r.dec.describe(r.parser.Frame()))
+				line := r.dec.appendFrame(append(r.line[:0], "  "...), r.parser.Frame())
+				Out.Write(append(line, '\n'))
 			}
 			continue
 		}
@@ -159,7 +163,9 @@ func (r *receiver) handle(data []byte) {
 		case !Sniff.Load():
 			continue
 		}
-		fmt.Fprintf(Out, "  %s (%#02x)\n", ncn.Describe(s, v), v)
+		line := ncn.AppendDescribe(append(r.line[:0], "  "...), s, v)
+		line = appendHex2(append(line, " (0x"...), v)
+		Out.Write(append(line, ")\n"...))
 	}
 }
 

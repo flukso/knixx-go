@@ -1,7 +1,5 @@
 package ncn
 
-import "strings"
-
 // Service identifies an indication from the NCN5121 to the host controller.
 type Service uint8
 
@@ -99,24 +97,30 @@ func ConPositive(b byte) bool {
 
 // Describe renders a service returned by Parser.Feed.
 func Describe(s Service, b byte) string {
+	return string(AppendDescribe(nil, s, b))
+}
+
+// AppendDescribe appends the rendering of a service returned by Parser.Feed
+// to dst. It does not allocate when dst has room.
+func AppendDescribe(dst []byte, s Service, b byte) []byte {
 	switch s {
 	case L_DataInd:
-		return "L_Data.ind"
+		return append(dst, "L_Data.ind"...)
 	case L_DataCon:
 		if ConPositive(b) {
-			return "L_Data.con: positive"
+			return append(dst, "L_Data.con: positive"...)
 		}
-		return "L_Data.con: negative"
+		return append(dst, "L_Data.con: negative"...)
 	case U_ResetInd:
-		return "U_Reset.ind"
+		return append(dst, "U_Reset.ind"...)
 	case U_StateInd:
-		return "U_State.ind: " + DecodeState(b)
+		return appendFlags(append(dst, "U_State.ind: "...), b, stateFlags[:], "no errors")
 	case U_FrameStateInd:
-		return "U_FrameState.ind: " + DecodeFrameState(b)
+		return appendFlags(append(dst, "U_FrameState.ind: "...), b, frameStateFlags[:], "ok")
 	case U_SystemStatInd:
-		return "U_SystemStat.ind: " + DecodeSystemStat(b)
+		return AppendSystemStat(append(dst, "U_SystemStat.ind: "...), b)
 	}
-	return ""
+	return dst
 }
 
 type flag struct {
@@ -124,19 +128,23 @@ type flag struct {
 	text string
 }
 
-func decodeFlags(b byte, flags []flag, none string) string {
-	var set [8]string
-	n := 0
+// appendFlags appends the texts of the flags set in b, separated by commas,
+// or none when no flag is set.
+func appendFlags(dst []byte, b byte, flags []flag, none string) []byte {
+	start := len(dst)
 	for _, f := range flags {
-		if b&f.mask != 0 {
-			set[n] = f.text
-			n++
+		if b&f.mask == 0 {
+			continue
 		}
+		if len(dst) > start {
+			dst = append(dst, ", "...)
+		}
+		dst = append(dst, f.text...)
 	}
-	if n == 0 {
-		return none
+	if len(dst) == start {
+		dst = append(dst, none...)
 	}
-	return strings.Join(set[:n], ", ")
+	return dst
 }
 
 var stateFlags = [...]flag{
@@ -149,7 +157,7 @@ var stateFlags = [...]flag{
 
 // DecodeState describes the flags of a U_State.ind byte.
 func DecodeState(b byte) string {
-	return decodeFlags(b, stateFlags[:], "no errors")
+	return string(appendFlags(nil, b, stateFlags[:], "no errors"))
 }
 
 var frameStateFlags = [...]flag{
@@ -160,7 +168,7 @@ var frameStateFlags = [...]flag{
 
 // DecodeFrameState describes the flags of a U_FrameState.ind byte.
 func DecodeFrameState(b byte) string {
-	return decodeFlags(b, frameStateFlags[:], "ok")
+	return string(appendFlags(nil, b, frameStateFlags[:], "ok"))
 }
 
 var systemStatBits = [...]flag{
@@ -175,18 +183,25 @@ var modes = [...]string{"Power-Up", "Sync", "Stop", "Normal"}
 
 // DecodeSystemStat describes the second byte of a U_SystemStat.ind.
 func DecodeSystemStat(b byte) string {
-	var parts [len(systemStatBits) + 2]string
-	for i, f := range systemStatBits {
+	return string(AppendSystemStat(nil, b))
+}
+
+// AppendSystemStat appends the description of the second byte of a
+// U_SystemStat.ind to dst.
+func AppendSystemStat(dst []byte, b byte) []byte {
+	for _, f := range systemStatBits {
+		dst = append(dst, f.text...)
 		if b&f.mask != 0 {
-			parts[i] = f.text + " ok"
+			dst = append(dst, " ok, "...)
 		} else {
-			parts[i] = f.text + " out of range"
+			dst = append(dst, " out of range, "...)
 		}
 	}
-	parts[len(systemStatBits)] = "no thermal warning"
 	if b&0x04 != 0 {
-		parts[len(systemStatBits)] = "thermal warning"
+		dst = append(dst, "thermal warning"...)
+	} else {
+		dst = append(dst, "no thermal warning"...)
 	}
-	parts[len(systemStatBits)+1] = "mode " + modes[b&0x03]
-	return strings.Join(parts[:], ", ")
+	dst = append(dst, ", mode "...)
+	return append(dst, modes[b&0x03]...)
 }

@@ -194,3 +194,20 @@ func TestNames(t *testing.T) {
 		}
 	}
 }
+
+func TestUnpackReusesData(t *testing.T) {
+	var payload [MaxPayload]byte
+	var tg Telegram
+	allocs := testing.AllocsPerRun(100, func() {
+		tg.Data = payload[:0]
+		if err := tg.Unpack(groupWriteFrame); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if allocs != 0 {
+		t.Errorf("Unpack allocated %v times", allocs)
+	}
+	if &tg.Data[0] != &payload[0] || tg.Data[0] != 0x01 {
+		t.Errorf("Data = %x, not in the payload array", tg.Data)
+	}
+}

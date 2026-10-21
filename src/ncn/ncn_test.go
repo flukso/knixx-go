@@ -140,3 +140,15 @@ func TestDescribe(t *testing.T) {
 		}
 	}
 }
+
+func TestAppendDescribeAllocs(t *testing.T) {
+	var buf [256]byte
+	allocs := testing.AllocsPerRun(100, func() {
+		for _, s := range []Service{L_DataCon, U_StateInd, U_FrameStateInd, U_SystemStatInd} {
+			AppendDescribe(buf[:0], s, 0xff)
+		}
+	})
+	if allocs != 0 {
+		t.Errorf("AppendDescribe allocated %v times", allocs)
+	}
+}

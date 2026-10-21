@@ -21,6 +21,9 @@ const (
 	maxPayloadLength = 15
 )
 
+// MaxPayload is the longest Data of a standard frame.
+const MaxPayload = maxPayloadLength
+
 const (
 	ctrlDefault     = 0x90
 	priorityOffset  = 2
@@ -143,7 +146,9 @@ func (tg *Telegram) Pack() ([]byte, error) {
 
 // Unpack decodes a standard frame as built by Pack, checksum included, into
 // tg. Data gets the octets from the APCI octet on, with the APCI bits of its
-// first octet cleared, in a new slice; Length is set to its length.
+// first octet cleared; Length is set to its length. Data reuses its own
+// capacity, so a telegram with room for MaxPayload octets is unpacked
+// without allocating; it never shares memory with buffer.
 func (tg *Telegram) Unpack(buffer []byte) error {
 	if len(buffer) < apci+1 {
 		return errors.New("tp1: frame too short")
@@ -185,8 +190,7 @@ func (tg *Telegram) Unpack(buffer []byte) error {
 		tg.Data = nil
 		return nil
 	}
-	tg.Data = make([]byte, length)
-	copy(tg.Data, buffer[apci:apci+length])
+	tg.Data = append(tg.Data[:0], buffer[apci:apci+length]...)
 	tg.Data[0] &^= 0x03 << apci2Offset
 	return nil
 }
