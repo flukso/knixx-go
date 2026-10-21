@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -29,6 +30,9 @@ const (
 
 // InfoFile is the file a UF2 bootloader's drive holds, with its board ID.
 const InfoFile = "INFO_UF2.TXT"
+
+// ErrNoDrive is returned by MountVolume when no drive has one of the names.
+var ErrNoDrive = errors.New("uf2: no such drive")
 
 // Check reports whether data is a complete UF2 file for family: whole
 // blocks with the UF2 magic numbers, the family ID in every block that goes
@@ -64,7 +68,8 @@ func Check(data []byte, family uint32) error {
 
 // FindVolume returns the mount point of the first drive named one of names
 // that holds InfoFile: /Volumes/<name> on macOS, a vfat mount from
-// /proc/mounts on Linux.
+// /proc/mounts on Linux. A drive nothing has mounted yet is not found; see
+// MountVolume.
 func FindVolume(names []string) (string, bool) {
 	var mounts []string
 	switch runtime.GOOS {

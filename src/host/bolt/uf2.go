@@ -21,7 +21,8 @@ const (
 // runUF2 flashes the UF2 file over USB, as tinygo flash does for the
 // Feather: a 1200 baud touch of the application's serial port resets the
 // board into its UF2 bootloader, whose USB drive gets the file. A board
-// that is in the bootloader already is flashed as it is.
+// that is in the bootloader already is flashed as it is. On Linux the drive
+// is mounted through udisks when nothing else mounts it.
 //
 // The bootloader resets the board as soon as it has the last block, while
 // the host may still write the drive's file entries, so a write error is
@@ -38,7 +39,8 @@ func runUF2(file, port, volume, expect string, wait time.Duration) error {
 	}
 	names := []string{volume}
 
-	mount, ok := uf2.FindVolume(names)
+	var warned bool
+	mount, ok := findVolume(names, &warned)
 	if ok {
 		status("%s is mounted: the board is in its bootloader", mount)
 	} else {
@@ -52,7 +54,7 @@ func runUF2(file, port, volume, expect string, wait time.Duration) error {
 			return err
 		}
 		time.Sleep(3 * time.Second)
-		if mount, err = waitVolume(names, wait); err != nil {
+		if mount, err = waitVolume(names, wait, &warned); err != nil {
 			return err
 		}
 	}
@@ -106,10 +108,34 @@ func appPort() (string, error) {
 	return "", fmt.Errorf("several serial ports (%s); pick one with -port", strings.Join(ports, ", "))
 }
 
+// findVolume returns the mount point of the bootloader's drive, mounting it
+// when no automounter has, as on a Linux desktop without one. A mount that
+// fails is reported once, through warned, so that the drive can still be
+// mounted by hand while bolt waits.
+func findVolume(names []string, warned *bool) (string, bool) {
+	if mount, ok := uf2.FindVolume(names); ok {
+		return mount, true
+	}
+	mount, err := uf2.MountVolume(names)
+	switch {
+	case errors.Is(err, uf2.ErrNoDrive):
+		return "", false
+	case err != nil:
+		if !*warned {
+			*warned = true
+			status("%v; mount it by hand", err)
+		}
+		return "", false
+	case mount != "":
+		status("mounted %s", mount)
+	}
+	return uf2.FindVolume(names)
+}
+
 // waitVolume polls every 500 ms for up to wait for the bootloader's drive.
-func waitVolume(names []string, wait time.Duration) (string, error) {
+func waitVolume(names []string, wait time.Duration, warned *bool) (string, error) {
 	for deadline := time.Now().Add(wait); ; time.Sleep(500 * time.Millisecond) {
-		if mount, ok := uf2.FindVolume(names); ok {
+		if mount, ok := findVolume(names, warned); ok {
 			return mount, nil
 		}
 		if time.Now().After(deadline) {

@@ -162,8 +162,9 @@ double-tap of reset) is flashed as it is. The bootloader resets the board as
 soon as it has the last block, while the host may still write the drive's
 file entries, so a write error is expected and not trusted either way: the
 flash passes once the board's `version` command prints the build just made.
-On Linux the drive must be automounted (udisks) and the user needs access to
-`/dev/ttyACM*` (the `dialout` group); on macOS the port is the one
+On Linux bolt asks udisks to mount the drive when no automounter has, as the
+user at the machine (polkit), and the user needs access to `/dev/ttyACM*`
+(the `dialout` group); on macOS the port is the one
 `/dev/cu.usbmodem*`, or `PORT=` when there are several.
 
 **Version.** The nrf builds embed the short commit hash, with `-dirty` when
@@ -261,7 +262,7 @@ none of it.
 | `internal/vl53l7cx` | Go port of ST's VL53L7CX ultra lite driver (ULD) 2.0.1 |
 | `host/internal/blescan` | finds a BLE peripheral by name or address, for `bolt` |
 | `host/internal/legacydfu` | the legacy Nordic DFU protocol of the Adafruit bootloader, and reading `adafruit-nrfutil` packages |
-| `host/internal/uf2` | checks UF2 files and finds the drive of a UF2 bootloader, for `bolt uf2` |
+| `host/internal/uf2` | checks UF2 files and finds or mounts the drive of a UF2 bootloader, for `bolt uf2` |
 | `host/internal/usbserial` | finds USB serial ports by USB ID, the 1200 baud reset into the bootloader and a console query, with termios, for `bolt uf2` |
 
 `internal/vl53l7cx` holds:

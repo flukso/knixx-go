@@ -4,6 +4,7 @@ go 1.27.1
 
 require (
 	github.com/abiosoft/ishell v2.0.0+incompatible
+	github.com/godbus/dbus/v5 v5.1.0
 	github.com/vapourismo/knx-go v0.0.0-20260813172143-02e535310602
 	github.com/zieckey/goini v0.0.0-20240615065340-08ee21c836fb
 	github.com/ziutek/ftdi v0.0.1
@@ -21,7 +22,6 @@ require (
 	github.com/fatih/color v1.19.0 // indirect
 	github.com/flynn-archive/go-shlex v0.0.0-20150515145356-3f9db97f8568 // indirect
 	github.com/go-ole/go-ole v1.2.6 // indirect
-	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/google/shlex v0.0.0-20191202100458-e7afc7fbc510 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/mattn/go-colorable v0.1.14 // indirect
