@@ -566,7 +566,7 @@ lines, circles and arcs, with the plate's lower-left corner at the origin.
 
 - **Plate:** 1 mm steel, 80 × 80 mm. Ø12.2 mm holes for the toggle switch
   bushings, 20 mm left and right of the centre.
-- **Window:** a 23 × 3 mm slot with rounded ends, centred on the VL53L7CX.
+- **Window:** a 23.2 × 3.2 mm slot with rounded ends, centred on the VL53L7CX.
 - **Height:** the plate's underside sits 3 mm above the switch bodies.
 - **Sensor board:** in the assembly, its underside is moved to 12 mm above
   the main board.

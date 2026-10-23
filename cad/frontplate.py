@@ -45,8 +45,8 @@ PLATE_THICKNESS = 1.0
 HOLE_DIAMETER = 12.2  # clearance for the M12 switch bushings
 HOLE_OFFSET = 20.0  # from the centre, left and right
 CUTOUT_WIDTH = 20.0  # of the rectangle; the half-circle ends add CUTOUT_HEIGHT
-CUTOUT_HEIGHT = 3.0
-# The cutout is centred in X, and in Y on the VL53L5CX (U3 on the sensor
+CUTOUT_HEIGHT = 3.2
+# The cutout is centred in X, and in Y on the VL53L7CX (U3 on the sensor
 # board), towards which +Y points.
 VL53 = "U3"
 PLATE_GAP = 3.0  # from the top of the toggle switch bodies to the plate
