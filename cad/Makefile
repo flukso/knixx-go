@@ -1,8 +1,8 @@
 # Renders the 3D model of the boards to the PNGs in pcb/: five views with a
 # transparent background. frontplate makes the STEP and the DXF of the front
-# plate, a DXF of the plate for each engraved curve, a DXF of a sampler of
-# nine of the curves, and the STEP of the boards with the plate. The STEP
-# model itself is not in the repository; point STEP= at it if it is
+# plate, a DXF of the plate for each engraved curve, a DXF and a PNG of a
+# sampler of nine of the curves, and the STEP of the boards with the plate.
+# The STEP model itself is not in the repository; point STEP= at it if it is
 # elsewhere. The Python packages are installed once in a venv here.
 
 STEP   ?= ../pcb/Knixx_Thunder_00.step
@@ -21,7 +21,7 @@ CURVES := hypotrochoid lemniscate lissajous cardioid astroid nephroid deltoid \
           limacon cassini trefoil mystery teardrop fish bicorn
 PLATE := $(OUTDIR)/$(BASE)_frontplate.step $(OUTDIR)/$(BASE)_frontplate.dxf \
          $(foreach c,$(CURVES),$(OUTDIR)/$(BASE)_frontplate_$(c).dxf) \
-         $(OUTDIR)/$(BASE)_sampler.dxf \
+         $(OUTDIR)/$(BASE)_sampler.dxf $(OUTDIR)/$(BASE)_sampler.png \
          $(OUTDIR)/$(BASE)_assembly.step
 
 .PHONY: render frontplate clean

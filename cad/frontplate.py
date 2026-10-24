@@ -12,6 +12,8 @@ Reads the STEP model of the boards and writes:
   <outdir>/<model>_sampler.dxf      the curves of SAMPLER engraved in a
                                     3 x 3 grid on a square of the plate's
                                     size, without holes
+  <outdir>/<model>_sampler.png      the sampler drawn in grey on a
+                                    transparent background
   <outdir>/<model>_assembly.step    the boards, with the sensor board moved
                                     to its standoff height, plus the plate
 """
@@ -45,6 +47,7 @@ from OCP.TopoDS import TopoDS
 from OCP.XCAFDoc import XCAFDoc_ColorSurf, XCAFDoc_DocumentTool, XCAFDoc_Location
 from OCP.collections import Sequence_TDF_Label
 from OCP.gp import gp_Ax2, gp_Dir, gp_Pnt, gp_Trsf, gp_Vec
+from PIL import Image, ImageDraw
 
 # Plate, in mm. X runs between the switches, +Y towards the sensor board.
 PLATE_SIZE = 80.0
@@ -65,6 +68,13 @@ PLATE_COLOR = (0.62, 0.64, 0.66)
 CURVE_RADIUS = 11.0
 CURVE_POINTS = 3600
 
+
+# The sampler's PNG: pixels per mm, line width in mm, line colour, and the
+# supersampling that smooths its lines.
+PNG_SCALE = 10
+PNG_LINE = 0.3
+PNG_COLOR = (128, 128, 128)
+PNG_SUPERSAMPLE = 4
 
 # The curves of the sampler, row by row from the top left.
 SAMPLER = ("cassini", "trefoil", "teardrop",
@@ -286,6 +296,13 @@ def outline(plate):
     return entities
 
 
+def sampler_centres():
+    """Returns the curves of SAMPLER with the centres of their cells."""
+    s = PLATE_SIZE
+    return [(curve, s * (2 * (i % 3) + 1) / 6, s * (5 - 2 * (i // 3)) / 6)
+            for i, curve in enumerate(SAMPLER)]
+
+
 def write_sampler(path):
     """Writes the sampler as an R12 DXF: the square of the plate on layer 0,
     and the curves of SAMPLER in the centres of a 3 x 3 grid on it."""
@@ -293,12 +310,37 @@ def write_sampler(path):
     out = ["0", "SECTION", "2", "ENTITIES"]
     for (ax, ay), (bx, by) in (((0, 0), (s, 0)), ((s, 0), (s, s)), ((s, s), (0, s)), ((0, s), (0, 0))):
         out += ["0", "LINE", "8", "0", "10", f"{ax:.6f}", "20", f"{ay:.6f}", "11", f"{bx:.6f}", "21", f"{by:.6f}"]
-    for i, curve in enumerate(SAMPLER):
-        row, col = divmod(i, 3)
-        out += engraving(curve, s * (2 * col + 1) / 6, s * (5 - 2 * row) / 6)
+    for curve, cx, cy in sampler_centres():
+        out += engraving(curve, cx, cy)
     out += ["0", "ENDSEC", "0", "EOF"]
     with open(path, "w") as f:
         f.write("\n".join(out) + "\n")
+
+
+def write_sampler_png(path):
+    """Draws the sampler, the square and its curves, in PNG_COLOR on a
+    transparent background. The lines are drawn into an alpha mask at
+    PNG_SUPERSAMPLE times the size, which is then scaled down."""
+    k = PNG_SCALE * PNG_SUPERSAMPLE
+    width = round(PNG_LINE * k)
+    pad = width  # keeps the square's outer half-width in the image
+    size = round(PLATE_SIZE * k) + 2 * pad
+
+    def px(x, y):
+        return pad + x * k, size - pad - y * k
+
+    mask = Image.new("L", (size, size), 0)
+    draw = ImageDraw.Draw(mask)
+    s = PLATE_SIZE
+    square = [px(0, 0), px(s, 0), px(s, s), px(0, s)]
+    draw.line(square + square[:1], fill=255, width=width, joint="curve")
+    for curve, cx, cy in sampler_centres():
+        pts = [px(cx + p.real, cy + p.imag) for p in curve_points(curve, CURVE_POINTS)]
+        draw.line(pts + pts[:1], fill=255, width=width, joint="curve")
+    mask = mask.resize((size // PNG_SUPERSAMPLE,) * 2, Image.LANCZOS)
+    img = Image.new("RGBA", mask.size, PNG_COLOR + (0,))
+    img.putalpha(mask)
+    img.save(path, optimize=True)
 
 
 def write_dxf(entities, path, curve=None):
@@ -419,6 +461,8 @@ def main():
         write_dxf(entities, curve_outs[-1], curve)
     sampler_out = base + "_sampler.dxf"
     write_sampler(sampler_out)
+    sampler_png = base + "_sampler.png"
+    write_sampler_png(sampler_png)
 
     add_plate(m.doc, m.st, plate, parent=m.root)
     write(m.doc, assembly_out)
@@ -427,7 +471,7 @@ def main():
     BRepGProp.VolumeProperties_s(plate, props)
     print(f"plate bbox {tuple(round(v, 2) for v in bbox(plate))}, volume {props.Mass():.1f} mm3")
     print(f"dxf: {', '.join(k for k, _ in entities)}")
-    for out in [plate_out, dxf_out] + curve_outs + [sampler_out, assembly_out]:
+    for out in [plate_out, dxf_out] + curve_outs + [sampler_out, sampler_png, assembly_out]:
         print(f"wrote {out}")
 
 

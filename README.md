@@ -569,6 +569,8 @@ repository. The tools in `cad/` install their Python packages
   left: Cassini oval, trefoil, teardrop; nephroid, Lissajous, limaçon;
   deltoid, hypotrochoid, bicorn. Each is centred in its 26.7 mm cell, at
   the same 11 mm radius as on the plates.
+- `<model>_sampler.png`: the sampler in grey on a transparent background,
+  shown below.
 - `<model>_assembly.step`: the boards with the plate.
 
 The DXFs are R12 in mm, with the plate's lower-left corner at the origin:
@@ -586,6 +588,10 @@ lines, circles and arcs for the outline on layer 0, and the curve on layer
 - **Height:** the plate's underside sits 3 mm above the switch bodies.
 - **Sensor board:** in the assembly, its underside is moved to 12 mm above
   the main board.
+
+<p align="center">
+  <img src="pcb/Knixx_Thunder_00_sampler.png" alt="The sampler: nine of the engraved curves in a 3 × 3 grid" width="50%">
+</p>
 
 The curves, as `<curve>` names them in the file names:
 
