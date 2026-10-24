@@ -558,20 +558,59 @@ The renders at the top of this README, and the top and bottom views in
 repository. The tools in `cad/` install their Python packages
 (OpenCascade, PyVista) in a venv there.
 
-`make -C cad frontplate STEP=<model.step>` makes the STEP of the front
-plate, `<model>_frontplate.step`, its outline for cutting,
-`<model>_frontplate.dxf`, and the STEP of the boards with the plate,
-`<model>_assembly.step`, next to the PNGs. The DXF is R12 in mm, made of
-lines, circles and arcs, with the plate's lower-left corner at the origin.
+`make -C cad frontplate STEP=<model.step>` makes, next to the PNGs:
+
+- `<model>_frontplate.step`: the plate, without engraving.
+- `<model>_frontplate.dxf`: its outline for cutting.
+- `<model>_frontplate_<curve>.dxf`: the outline with a curve engraved, one
+  for each of the 14 curves below.
+- `<model>_sampler.dxf`: nine of the curves in a 3 × 3 grid, on a plain
+  80 × 80 mm square without the holes and the window. By row from the top
+  left: Cassini oval, trefoil, teardrop; nephroid, Lissajous, limaçon;
+  deltoid, hypotrochoid, bicorn. Each is centred in its 26.7 mm cell, at
+  the same 11 mm radius as on the plates.
+- `<model>_assembly.step`: the boards with the plate.
+
+The DXFs are R12 in mm, with the plate's lower-left corner at the origin:
+lines, circles and arcs for the outline on layer 0, and the curve on layer
+`ENGRAVE`.
 
 - **Plate:** 1 mm steel, 80 × 80 mm. Ø12.2 mm holes for the toggle switch
   bushings, 20 mm left and right of the centre.
 - **Window:** a 23.2 × 3.2 mm slot with rounded ends, centred on the VL53L7CX.
+- **Engraving:** each curve is one closed polyline of 3600 points, so it
+  engraves as a single toolpath. It is centred in X, a quarter of the plate
+  up from the bottom edge, and scaled to 11 mm at its largest radius. A
+  curve with a centre of symmetry is centred on it, any other on the middle
+  of its bounding box.
 - **Height:** the plate's underside sits 3 mm above the switch bodies.
 - **Sensor board:** in the assembly, its underside is moved to 12 mm above
   the main board.
 
-The dimensions are constants at the top of `cad/frontplate.py`.
+The curves, as `<curve>` names them in the file names:
+
+| `<curve>` | Curve | z(t) or r(θ) |
+|---|---|---|
+| `hypotrochoid` | Hypotrochoid, R = 5, r = 3, d = 5 | 2e^(it) + 5e^(−2it/3), t over 6π |
+| `lemniscate` | Lemniscate of Bernoulli | (cos t + i sin t cos t) / (1 + sin² t) |
+| `lissajous` | Lissajous 1:2, phase π/4 | sin t + i sin(2t + π/4) |
+| `cardioid` | Cardioid | r = 1 − cos θ |
+| `astroid` | Astroid | cos³ t + i sin³ t |
+| `nephroid` | Nephroid | 3e^(it) − e^(3it) |
+| `deltoid` | Deltoid | 2e^(it) + e^(−2it) |
+| `limacon` | Limaçon with inner loop | r = 1 + 2 cos θ |
+| `cassini` | Cassini oval, a = 1, b = 1.05 | r² = a² cos 2θ + √(b⁴ − a⁴ sin² 2θ) |
+| `trefoil` | Trefoil knot, projected | (sin t + 2 sin 2t) + i (cos t − 2 cos 2t) |
+| `mystery` | Frank Farris's mystery curve, frequencies 1, 6 and −14 | e^(it) + e^(6it)/2 + i e^(−14it)/3 |
+| `teardrop` | Teardrop | cos t + i sin t sin²(t/2) |
+| `fish` | Fish curve | (cos t − sin² t / √2) + i cos t sin t |
+| `bicorn` | Bicorn | sin t + i cos² t (2 + cos t) / (3 + sin² t) |
+
+The Lissajous curve has its phase on the second term: on the first, it
+folds onto the parabola y = 2x² − 1.
+
+The dimensions and the curves are constants at the top of
+`cad/frontplate.py`.
 
 ## License
 

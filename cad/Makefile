@@ -1,8 +1,9 @@
 # Renders the 3D model of the boards to the PNGs in pcb/: five views with a
 # transparent background. frontplate makes the STEP and the DXF of the front
-# plate and the STEP of the boards with the plate. The STEP model itself is not in the repository;
-# point STEP= at it if it is elsewhere. The Python packages are installed
-# once in a venv here.
+# plate, a DXF of the plate for each engraved curve, a DXF of a sampler of
+# nine of the curves, and the STEP of the boards with the plate. The STEP
+# model itself is not in the repository; point STEP= at it if it is
+# elsewhere. The Python packages are installed once in a venv here.
 
 STEP   ?= ../pcb/Knixx_Thunder_00.step
 OUTDIR ?= ../pcb
@@ -15,7 +16,12 @@ PY     ?= $(firstword $(foreach v,14 13 12 11,$(shell command -v python3.$(v))) 
 BASE  := $(basename $(notdir $(STEP)))
 VIEWS := iso_front iso_back top bottom side
 PNGS  := $(foreach v,$(VIEWS),$(OUTDIR)/$(BASE)_$(v).png)
+# The engraved curves, as CURVES in frontplate.py names them.
+CURVES := hypotrochoid lemniscate lissajous cardioid astroid nephroid deltoid \
+          limacon cassini trefoil mystery teardrop fish bicorn
 PLATE := $(OUTDIR)/$(BASE)_frontplate.step $(OUTDIR)/$(BASE)_frontplate.dxf \
+         $(foreach c,$(CURVES),$(OUTDIR)/$(BASE)_frontplate_$(c).dxf) \
+         $(OUTDIR)/$(BASE)_sampler.dxf \
          $(OUTDIR)/$(BASE)_assembly.step
 
 .PHONY: render frontplate clean
@@ -28,7 +34,7 @@ $(PNGS) &: $(STEP) render_step.py $(VENV)/.installed
 
 frontplate: $(PLATE)
 
-# One run writes the plate, its DXF and the assembly.
+# One run writes the plate, its DXFs and the assembly.
 $(PLATE) &: $(STEP) frontplate.py $(VENV)/.installed
 	$(PYTHON) frontplate.py $(STEP) $(OUTDIR)
 

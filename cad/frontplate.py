@@ -6,10 +6,17 @@ Reads the STEP model of the boards and writes:
   <outdir>/<model>_frontplate.step  the plate alone, in the assembly frame
   <outdir>/<model>_frontplate.dxf   the plate's outline for cutting, in mm,
                                     with its lower-left corner at the origin
+  <outdir>/<model>_frontplate_<curve>.dxf
+                                    the outline with a curve of CURVES
+                                    engraved, one DXF for each
+  <outdir>/<model>_sampler.dxf      the curves of SAMPLER engraved in a
+                                    3 x 3 grid on a square of the plate's
+                                    size, without holes
   <outdir>/<model>_assembly.step    the boards, with the sensor board moved
                                     to its standoff height, plus the plate
 """
 
+import cmath
 import math
 import os
 import sys
@@ -51,6 +58,62 @@ CUTOUT_HEIGHT = 3.2
 VL53 = "U3"
 PLATE_GAP = 3.0  # from the top of the toggle switch bodies to the plate
 PLATE_COLOR = (0.62, 0.64, 0.66)
+
+# The engravings, on the DXF's ENGRAVE layer: each curve is one closed
+# polyline, centred in X and a quarter of the plate up from its bottom edge,
+# scaled so that its point farthest from the centre is CURVE_RADIUS away.
+CURVE_RADIUS = 11.0
+CURVE_POINTS = 3600
+
+
+# The curves of the sampler, row by row from the top left.
+SAMPLER = ("cassini", "trefoil", "teardrop",
+           "nephroid", "lissajous", "limacon",
+           "deltoid", "hypotrochoid", "bicorn")
+
+
+def _polar(r):
+    """Returns the curve of the polar equation r(theta)."""
+    return lambda t: r(t) * cmath.exp(1j * t)
+
+
+def _cassini(t, a=1.0, b=1.05):
+    # One oval, dimpled, for a < b < a sqrt 2.
+    c2 = math.cos(2 * t)
+    return math.sqrt(a * a * c2 + math.sqrt(b ** 4 - a ** 4 * (1 - c2 * c2))) * cmath.exp(1j * t)
+
+
+# The curves, by the name in their DXF's file name: z(t), t running over
+# [0, period), and whether the curve is centred on the origin of z, its
+# centre of symmetry, or else on the middle of its bounding box.
+CURVES = {
+    # R = 5, r = 3, d = 5: closes after 3 turns.
+    "hypotrochoid": (lambda t: 2 * cmath.exp(1j * t) + 5 * cmath.exp(-2j * t / 3), 6 * math.pi, True),
+    # Of Bernoulli.
+    "lemniscate": (lambda t: complex(math.cos(t), math.sin(t) * math.cos(t)) / (1 + math.sin(t) ** 2),
+                   2 * math.pi, True),
+    # Frequencies 1:2, phase pi/4 on the second: on the first, the curve
+    # folds onto the parabola y = 2x^2 - 1.
+    "lissajous": (lambda t: complex(math.sin(t), math.sin(2 * t + math.pi / 4)), 2 * math.pi, True),
+    "cardioid": (_polar(lambda t: 1 - math.cos(t)), 2 * math.pi, False),
+    "astroid": (lambda t: complex(math.cos(t) ** 3, math.sin(t) ** 3), 2 * math.pi, True),
+    "nephroid": (lambda t: 3 * cmath.exp(1j * t) - cmath.exp(3j * t), 2 * math.pi, True),
+    "deltoid": (lambda t: 2 * cmath.exp(1j * t) + cmath.exp(-2j * t), 2 * math.pi, True),
+    # With its inner loop.
+    "limacon": (_polar(lambda t: 1 + 2 * math.cos(t)), 2 * math.pi, False),
+    "cassini": (_cassini, 2 * math.pi, True),
+    # The projection of the trefoil knot.
+    "trefoil": (lambda t: complex(math.sin(t) + 2 * math.sin(2 * t), math.cos(t) - 2 * math.cos(2 * t)),
+                2 * math.pi, True),
+    # Frank Farris's, with frequencies 1, 6 and -14.
+    "mystery": (lambda t: cmath.exp(1j * t) + cmath.exp(6j * t) / 2 + 1j * cmath.exp(-14j * t) / 3,
+                2 * math.pi, True),
+    "teardrop": (lambda t: complex(math.cos(t), math.sin(t) * math.sin(t / 2) ** 2), 2 * math.pi, False),
+    "fish": (lambda t: complex(math.cos(t) - math.sin(t) ** 2 / math.sqrt(2), math.cos(t) * math.sin(t)),
+             2 * math.pi, False),
+    "bicorn": (lambda t: complex(math.sin(t), math.cos(t) ** 2 * (2 + math.cos(t)) / (3 + math.sin(t) ** 2)),
+               2 * math.pi, False),
+}
 
 # The sensor board's underside sits this far above the main board's top.
 SENSOR_STANDOFF = 12.0
@@ -177,10 +240,10 @@ def add_plate(doc, st, plate, parent=None):
     st.UpdateAssemblies()
 
 
-def write_dxf(plate, path):
-    """Writes the edges of the plate's top face as an R12 DXF in mm: lines,
-    circles and arcs, shifted so that the plate's lower-left corner is at
-    the origin."""
+def outline(plate):
+    """Returns the edges of the plate's top face as DXF entities in mm:
+    lines, circles and arcs, shifted so that the plate's lower-left corner
+    is at the origin."""
     x0, y0, _, _, _, z1 = bbox(plate)
     top = None
     e = TopExp_Explorer(plate, TopAbs_FACE)
@@ -220,15 +283,63 @@ def write_dxf(plate, path):
             sys.exit(f"plate: cannot write a {c.GetType()} edge to DXF")
         e.Next()
 
+    return entities
+
+
+def write_sampler(path):
+    """Writes the sampler as an R12 DXF: the square of the plate on layer 0,
+    and the curves of SAMPLER in the centres of a 3 x 3 grid on it."""
+    s = PLATE_SIZE
+    out = ["0", "SECTION", "2", "ENTITIES"]
+    for (ax, ay), (bx, by) in (((0, 0), (s, 0)), ((s, 0), (s, s)), ((s, s), (0, s)), ((0, s), (0, 0))):
+        out += ["0", "LINE", "8", "0", "10", f"{ax:.6f}", "20", f"{ay:.6f}", "11", f"{bx:.6f}", "21", f"{by:.6f}"]
+    for i, curve in enumerate(SAMPLER):
+        row, col = divmod(i, 3)
+        out += engraving(curve, s * (2 * col + 1) / 6, s * (5 - 2 * row) / 6)
+    out += ["0", "ENDSEC", "0", "EOF"]
+    with open(path, "w") as f:
+        f.write("\n".join(out) + "\n")
+
+
+def write_dxf(entities, path, curve=None):
+    """Writes entities, from outline, as an R12 DXF on layer 0, with the
+    curve of CURVES named curve engraved."""
     out = ["0", "SECTION", "2", "ENTITIES"]
     for kind, codes in entities:
         out += ["0", kind, "8", "0"]
         for code, v in codes:
             out += [str(code), f"{v:.6f}"]
+    if curve is not None:
+        out += engraving(curve, PLATE_SIZE / 2, PLATE_SIZE / 4)
     out += ["0", "ENDSEC", "0", "EOF"]
     with open(path, "w") as f:
         f.write("\n".join(out) + "\n")
-    return entities
+
+
+def curve_points(curve, n):
+    """Returns n points of the curve of CURVES named curve, around its
+    centre, scaled to CURVE_RADIUS."""
+    z, period, symmetric = CURVES[curve]
+    pts = [z(period * k / n) for k in range(n)]
+    if not symmetric:
+        xs, ys = [p.real for p in pts], [p.imag for p in pts]
+        c = complex(min(xs) + max(xs), min(ys) + max(ys)) / 2
+        pts = [p - c for p in pts]
+    scale = CURVE_RADIUS / max(abs(p) for p in pts)
+    return [scale * p for p in pts]
+
+
+def engraving(curve, cx, cy):
+    """Returns the DXF entities of the engraving of the curve of CURVES named
+    curve, centred on (cx, cy), on layer ENGRAVE: one closed POLYLINE, so
+    that it is a single toolpath."""
+    pts = curve_points(curve, CURVE_POINTS)
+    out = ["0", "POLYLINE", "8", "ENGRAVE", "66", "1", "10", "0.0", "20", "0.0", "30", "0.0", "70", "1"]
+    for p in pts:
+        out += ["0", "VERTEX", "8", "ENGRAVE",
+                "10", f"{cx + p.real:.6f}", "20", f"{cy + p.imag:.6f}", "30", "0.0"]
+    out += ["0", "SEQEND", "8", "ENGRAVE"]
+    return out
 
 
 def write(doc, path):
@@ -300,7 +411,14 @@ def main():
     pdoc = TDocStd_Document(TCollection_ExtendedString("XmlOcaf"))
     add_plate(pdoc, XCAFDoc_DocumentTool.ShapeTool_s(pdoc.Main()), plate)
     write(pdoc, plate_out)
-    entities = write_dxf(plate, dxf_out)
+    entities = outline(plate)
+    write_dxf(entities, dxf_out)
+    curve_outs = []
+    for curve in CURVES:
+        curve_outs.append(f"{base}_frontplate_{curve}.dxf")
+        write_dxf(entities, curve_outs[-1], curve)
+    sampler_out = base + "_sampler.dxf"
+    write_sampler(sampler_out)
 
     add_plate(m.doc, m.st, plate, parent=m.root)
     write(m.doc, assembly_out)
@@ -309,7 +427,8 @@ def main():
     BRepGProp.VolumeProperties_s(plate, props)
     print(f"plate bbox {tuple(round(v, 2) for v in bbox(plate))}, volume {props.Mass():.1f} mm3")
     print(f"dxf: {', '.join(k for k, _ in entities)}")
-    print(f"wrote {plate_out}\nwrote {dxf_out}\nwrote {assembly_out}")
+    for out in [plate_out, dxf_out] + curve_outs + [sampler_out, assembly_out]:
+        print(f"wrote {out}")
 
 
 if __name__ == "__main__":
