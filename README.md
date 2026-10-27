@@ -9,9 +9,9 @@ written in Go and compiled with [TinyGo](https://tinygo.org). It talks to the
 KNX bus through an onsemi NCN5121 transceiver on UART0 at 38400 baud.
 
 <p align="center">
-  <img src="pcb/Knixx_Thunder_00_iso_front.png" alt="knixx Thunder, front" width="32%">
-  <img src="pcb/Knixx_Thunder_00_iso_back.png" alt="knixx Thunder, back" width="32%">
-  <img src="pcb/Knixx_Thunder_00_side.png" alt="knixx Thunder, side" width="32%">
+  <img src="docs/img/Knixx_Thunder_00_iso_front.png" alt="knixx Thunder, front" width="32%">
+  <img src="docs/img/Knixx_Thunder_00_iso_back.png" alt="knixx Thunder, back" width="32%">
+  <img src="docs/img/Knixx_Thunder_00_side.png" alt="knixx Thunder, side" width="32%">
 </p>
 
 ## Functionality
@@ -560,15 +560,26 @@ config init                 restore and save the built-in default
 
 ## Renders
 
-The renders at the top of this README, and the top and bottom views in
-`pcb/`, are made from the 3D model of the assembled boards with
-`make -C cad render STEP=<model.step>`. The model is not in the
-repository. The tools in `cad/` install their Python packages
-(OpenCascade, PyVista) in a venv there.
+The tools in `cad/` write their outputs to `build/cad/`, named after the 3D
+model of the assembled boards, `pcb/Knixx_Thunder_00.step` unless `STEP=`
+points elsewhere. The model is not in the repository. They install their
+Python packages (OpenCascade, PyVista) in a venv in `cad/`.
 
-`make -C cad frontplate STEP=<model.step>` makes, next to the PNGs:
+- `make -C cad render` renders the model from five angles, with a
+  transparent background: `<model>_{iso_front,iso_back,top,bottom,side}.png`.
+  It needs the model.
+- `make -C cad readme` renders and copies the PNGs that this README shows to
+  `docs/img/`, which is tracked.
 
-- `<model>_frontplate.step`: the plate, without engraving.
+`make -C cad frontplate` makes the front plate. The plate needs no model:
+its dimensions, below, are constants at the top of `cad/frontplate.py`. With
+the model present, the plate is first checked against it: the switch axes
+must be 40 mm apart, like the holes, and the VL53L7CX must sit
+`SLOT_OFFSET` (17.955 mm) above the line through them, like the window; a
+mismatch stops it before it writes anything. It makes:
+
+- `<model>_frontplate.step`: the plate, without engraving, with its
+  lower-left corner at the origin and its underside at z = 0.
 - `<model>_frontplate.dxf`: its outline for cutting.
 - `<model>_frontplate_<curve>.dxf`: the outline with a curve engraved, one
   for each of the 14 curves below.
@@ -579,7 +590,9 @@ repository. The tools in `cad/` install their Python packages
   the same 11 mm radius as on the plates.
 - `<model>_sampler.png`: the sampler in grey on a transparent background,
   shown below.
-- `<model>_assembly.step`: the boards with the plate.
+- `<model>_assembly.step`, only with the model: the boards with the plate.
+  `make -C cad render STEP=../build/cad/Knixx_Thunder_00_assembly.step`
+  renders it.
 
 The DXFs are R12 in mm, with the plate's lower-left corner at the origin:
 lines, circles and arcs for the outline on layer 0, and the curve on layer
@@ -587,7 +600,8 @@ lines, circles and arcs for the outline on layer 0, and the curve on layer
 
 - **Plate:** 1 mm steel, 80 × 80 mm. Ø12.2 mm holes for the toggle switch
   bushings, 20 mm left and right of the centre.
-- **Window:** a 23.2 × 3.2 mm slot with rounded ends, centred on the VL53L7CX.
+- **Window:** a 23.2 × 3.2 mm slot with rounded ends, centred in X and
+  17.955 mm above the switch axes, on the VL53L7CX.
 - **Engraving:** each curve is one closed polyline of 3600 points, so it
   engraves as a single toolpath. It is centred in X, a quarter of the plate
   up from the bottom edge, and scaled to 11 mm at its largest radius. A
@@ -598,7 +612,7 @@ lines, circles and arcs for the outline on layer 0, and the curve on layer
   the main board.
 
 <p align="center">
-  <img src="pcb/Knixx_Thunder_00_sampler.png" alt="The sampler: nine of the engraved curves in a 3 × 3 grid" width="50%">
+  <img src="docs/img/Knixx_Thunder_00_sampler.png" alt="The sampler: nine of the engraved curves in a 3 × 3 grid" width="50%">
 </p>
 
 The curves, as `<curve>` names them in the file names:

@@ -1,20 +1,26 @@
-"""Build the Thunder front plate and the combined assembly STEP.
+"""Build the Thunder front plate and, with the boards' model, the assembly.
 
-usage: frontplate.py <model.step> <outdir>
+usage: frontplate.py <outdir> <name> [<model.step>]
 
-Reads the STEP model of the boards and writes:
-  <outdir>/<model>_frontplate.step  the plate alone, in the assembly frame
-  <outdir>/<model>_frontplate.dxf   the plate's outline for cutting, in mm,
-                                    with its lower-left corner at the origin
-  <outdir>/<model>_frontplate_<curve>.dxf
+Writes, from the dimensions below alone:
+  <outdir>/<name>_frontplate.step   the plate alone, in mm, with its
+                                    lower-left corner at the origin and its
+                                    underside at z = 0
+  <outdir>/<name>_frontplate.dxf    the plate's outline for cutting, in the
+                                    same frame
+  <outdir>/<name>_frontplate_<curve>.dxf
                                     the outline with a curve of CURVES
                                     engraved, one DXF for each
-  <outdir>/<model>_sampler.dxf      the curves of SAMPLER engraved in a
+  <outdir>/<name>_sampler.dxf       the curves of SAMPLER engraved in a
                                     3 x 3 grid on a square of the plate's
                                     size, without holes
-  <outdir>/<model>_sampler.png      the sampler drawn in grey on a
+  <outdir>/<name>_sampler.png       the sampler drawn in grey on a
                                     transparent background
-  <outdir>/<model>_assembly.step    the boards, with the sensor board moved
+
+With the STEP model of the boards, it first checks the plate against it:
+the switch spacing against the holes and the VL53L7CX against the slot.
+It then also writes:
+  <outdir>/<name>_assembly.step     the boards, with the sensor board moved
                                     to its standoff height, plus the plate
 """
 
@@ -25,6 +31,7 @@ import sys
 
 from OCP.BRepAdaptor import BRepAdaptor_Curve, BRepAdaptor_Surface
 from OCP.BRepAlgoAPI import BRepAlgoAPI_Cut
+from OCP.BRepBuilderAPI import BRepBuilderAPI_Transform
 from OCP.BRepBndLib import BRepBndLib
 from OCP.BRepGProp import BRepGProp
 from OCP.BRepPrimAPI import BRepPrimAPI_MakeBox, BRepPrimAPI_MakeCylinder
@@ -57,8 +64,12 @@ HOLE_OFFSET = 20.0  # from the centre, left and right
 CUTOUT_WIDTH = 20.0  # of the rectangle; the half-circle ends add CUTOUT_HEIGHT
 CUTOUT_HEIGHT = 3.2
 # The cutout is centred in X, and in Y on the VL53L7CX (U3 on the sensor
-# board), towards which +Y points.
+# board), towards which +Y points: SLOT_OFFSET above the line through the
+# switch axes, as measured on the model. With the model, the script checks
+# that the sensor is still there, within SLOT_TOLERANCE.
 VL53 = "U3"
+SLOT_OFFSET = 17.955
+SLOT_TOLERANCE = 0.05
 PLATE_GAP = 3.0  # from the top of the toggle switch bodies to the plate
 PLATE_COLOR = (0.62, 0.64, 0.66)
 
@@ -216,26 +227,38 @@ def switch_geometry(model, path):
     return ((b[0] + b[3]) / 2, (b[1] + b[4]) / 2), body[5], b
 
 
-def make_plate(cx, cy, z, cutout_y):
+def make_plate():
+    """Returns the plate in its own frame: the lower-left corner at the
+    origin, the underside at z = 0, the switch axes on y = PLATE_SIZE / 2."""
     s = PLATE_SIZE
     t = PLATE_THICKNESS
-    plate = BRepPrimAPI_MakeBox(gp_Pnt(cx - s / 2, cy - s / 2, z), s, s, t).Shape()
+    cx = cy = s / 2
+    cutout_y = cy + SLOT_OFFSET
+    plate = BRepPrimAPI_MakeBox(gp_Pnt(0, 0, 0), s, s, t).Shape()
     for dx in (-HOLE_OFFSET, HOLE_OFFSET):
         hole = BRepPrimAPI_MakeCylinder(
-            gp_Ax2(gp_Pnt(cx + dx, cy, z - 1), gp_Dir(0, 0, 1)),
+            gp_Ax2(gp_Pnt(cx + dx, cy, -1), gp_Dir(0, 0, 1)),
             HOLE_DIAMETER / 2, t + 2).Shape()
         plate = BRepAlgoAPI_Cut(plate, hole).Shape()
     cutout = BRepPrimAPI_MakeBox(
-        gp_Pnt(cx - CUTOUT_WIDTH / 2, cutout_y - CUTOUT_HEIGHT / 2, z - 1),
+        gp_Pnt(cx - CUTOUT_WIDTH / 2, cutout_y - CUTOUT_HEIGHT / 2, -1),
         CUTOUT_WIDTH, CUTOUT_HEIGHT, t + 2).Shape()
     plate = BRepAlgoAPI_Cut(plate, cutout).Shape()
     # Half-circles on both ends make the cutout a slot.
     for dx in (-CUTOUT_WIDTH / 2, CUTOUT_WIDTH / 2):
         end = BRepPrimAPI_MakeCylinder(
-            gp_Ax2(gp_Pnt(cx + dx, cutout_y, z - 1), gp_Dir(0, 0, 1)),
+            gp_Ax2(gp_Pnt(cx + dx, cutout_y, -1), gp_Dir(0, 0, 1)),
             CUTOUT_HEIGHT / 2, t + 2).Shape()
         plate = BRepAlgoAPI_Cut(plate, end).Shape()
     return plate
+
+
+def placed(plate, cx, cy, z):
+    """Returns plate moved from its own frame to the switch axes' centre
+    (cx, cy) in the model, with its underside at z."""
+    t = gp_Trsf()
+    t.SetTranslation(gp_Vec(cx - PLATE_SIZE / 2, cy - PLATE_SIZE / 2, z))
+    return BRepBuilderAPI_Transform(plate, t, True).Shape()
 
 
 def add_plate(doc, st, plate, parent=None):
@@ -394,15 +417,10 @@ def write(doc, path):
         sys.exit(f"cannot write {path}")
 
 
-def main():
-    if len(sys.argv) != 3:
-        sys.exit("usage: frontplate.py <model.step> <outdir>")
-    model, outdir = sys.argv[1:]
-    base = os.path.join(outdir, os.path.splitext(os.path.basename(model))[0])
-    plate_out = base + "_frontplate.step"
-    dxf_out = base + "_frontplate.dxf"
-    assembly_out = base + "_assembly.step"
-
+def fit(model):
+    """Checks the plate against the STEP model of the boards and returns the
+    model, with the sensor board moved to its standoff height, and where the
+    plate goes in it: the centre of the switch axes and the underside's z."""
     m = Model(model)
 
     # The main board is the component holding the switches; the other
@@ -445,33 +463,51 @@ def main():
     if len(vl53) != 1:
         sys.exit(f"expected one {VL53} on the sensor board, found {len(vl53)}")
     _, y0, _, _, y1, _ = bbox(m.world((sensor,) + vl53[0]))
-    cutout_y = (y0 + y1) / 2
-    print(f"VL53L5CX centre y={cutout_y:.2f}, {cutout_y - cy:.2f} mm from the switch axis line")
+    offset = (y0 + y1) / 2 - cy
+    print(f"VL53L7CX centre {offset:.3f} mm from the switch axis line")
+    if abs(offset - SLOT_OFFSET) > SLOT_TOLERANCE:
+        sys.exit(f"the VL53L7CX is {offset:.3f} mm from the switch axis line, the slot "
+                 f"{SLOT_OFFSET} mm: set SLOT_OFFSET")
+    return m, cx, cy, z
 
-    plate = make_plate(cx, cy, z, cutout_y)
 
+def main():
+    if len(sys.argv) not in (3, 4):
+        sys.exit("usage: frontplate.py <outdir> <name> [<model.step>]")
+    outdir, name = sys.argv[1:3]
+    model = sys.argv[3] if len(sys.argv) == 4 else None
+    base = os.path.join(outdir, name)
+
+    # Check the model first, so that a mismatch writes nothing.
+    fitted = fit(model) if model else None
+
+    plate = make_plate()
+    plate_out = base + "_frontplate.step"
     pdoc = TDocStd_Document(TCollection_ExtendedString("XmlOcaf"))
     add_plate(pdoc, XCAFDoc_DocumentTool.ShapeTool_s(pdoc.Main()), plate)
     write(pdoc, plate_out)
     entities = outline(plate)
-    write_dxf(entities, dxf_out)
-    curve_outs = []
+    outs = [plate_out, base + "_frontplate.dxf"]
+    write_dxf(entities, outs[-1])
     for curve in CURVES:
-        curve_outs.append(f"{base}_frontplate_{curve}.dxf")
-        write_dxf(entities, curve_outs[-1], curve)
-    sampler_out = base + "_sampler.dxf"
-    write_sampler(sampler_out)
-    sampler_png = base + "_sampler.png"
-    write_sampler_png(sampler_png)
+        outs.append(f"{base}_frontplate_{curve}.dxf")
+        write_dxf(entities, outs[-1], curve)
+    outs.append(base + "_sampler.dxf")
+    write_sampler(outs[-1])
+    outs.append(base + "_sampler.png")
+    write_sampler_png(outs[-1])
 
-    add_plate(m.doc, m.st, plate, parent=m.root)
-    write(m.doc, assembly_out)
+    if fitted:
+        m, cx, cy, z = fitted
+        add_plate(m.doc, m.st, placed(plate, cx, cy, z), parent=m.root)
+        outs.append(base + "_assembly.step")
+        write(m.doc, outs[-1])
 
     props = GProp_GProps()
     BRepGProp.VolumeProperties_s(plate, props)
     print(f"plate bbox {tuple(round(v, 2) for v in bbox(plate))}, volume {props.Mass():.1f} mm3")
     print(f"dxf: {', '.join(k for k, _ in entities)}")
-    for out in [plate_out, dxf_out] + curve_outs + [sampler_out, sampler_png, assembly_out]:
+    for out in outs:
         print(f"wrote {out}")
 
 
