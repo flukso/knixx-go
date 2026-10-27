@@ -8,6 +8,7 @@ import (
 	"io"
 	"knixx/bus"
 	"knixx/cli"
+	"knixx/internal/i2cbus"
 	"knixx/led"
 	"knixx/version"
 	"machine"
@@ -40,6 +41,10 @@ func main() {
 
 	runConsole(append(cli.Commands(dev, flashStore{}, cmds), sensorCmd(), tofCmd(dev), nusCmd(), otaCmd(), versionCmd(), sysCmd()), log.Bytes())
 }
+
+// i2c1 is I2C1 for the drivers: the sensor and ToF goroutines share it,
+// one transfer at a time.
+var i2c1 = i2cbus.New(machine.I2C1)
 
 // configureI2C sets up I2C1, which the SHT20 and the VL53L7CX share. I2C0
 // shares its peripheral instance with SPI0, which drives the flash. At

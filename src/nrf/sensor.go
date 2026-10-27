@@ -9,7 +9,6 @@ import (
 	"knixx/cli"
 	"knixx/internal/sht2x"
 	"knixx/internal/vcnl4040"
-	"machine"
 	"time"
 )
 
@@ -51,8 +50,8 @@ var (
 // deadline (when += period): the measurement time and any delay in handling
 // a tick do not accumulate, so the readings stay sensorInterval apart.
 func runSensor(cmds chan<- bus.Command) {
-	sensor = sht2x.New(machine.I2C1)
-	light = vcnl4040.New(machine.I2C1)
+	sensor = sht2x.New(i2c1)
+	light = vcnl4040.New(i2c1)
 
 	time.Sleep(sensorFirst)
 	ticker := time.NewTicker(sensorInterval)

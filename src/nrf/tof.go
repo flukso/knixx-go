@@ -95,7 +95,7 @@ func runToF(dev *thunder.Device, cmds chan<- bus.Command) {
 		fail("vl53l7cx: interrupt:", err)
 		return
 	}
-	tof = vl53l7cx.New(machine.I2C1)
+	tof = vl53l7cx.New(i2c1)
 
 	for first := true; ; time.Sleep(tofRetry) {
 		s := settingsOf(dev, tofStatus.applied)

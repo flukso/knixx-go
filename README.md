@@ -283,6 +283,7 @@ none of it.
 | `switches` | the wall switch logic: the press counter `Edges` and the `Hold` gesture detector |
 | `version` | the commit and build time, set at link time |
 | `led` | the status LEDs: the `Trigger`s, the `Player` that queues and plays the modes, and `Run`, the goroutine that owns the LEDs |
+| `internal/i2cbus` | shares I2C1 between the sensor and ToF goroutines, one transfer at a time |
 | `internal/sht2x` | SHT2x temperature and humidity sensor driver |
 | `internal/vcnl4040` | VCNL4040 ambient light sensor driver, single measurements |
 | `internal/vl53l7cx` | Go port of ST's VL53L7CX ultra lite driver (ULD) 2.0.1 |
