@@ -4,3 +4,5 @@
 /src/internal/vl53l7cx/VL53L7CX_ULD_driver_2.0.1/CubeIDE_F401RE_Example/
 # the venv of the CAD tools
 /cad/.venv/
+# the patched copy of TinyGo, see patches/
+/tinygo/

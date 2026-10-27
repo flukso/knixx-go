@@ -1,0 +1,40 @@
+--- a/src/runtime/runtime_nrf.go	2026-10-27 14:03:16
++++ b/src/runtime/runtime_nrf.go	2026-10-27 14:03:16
+@@ -133,8 +133,14 @@
+ var rtc_wakeup volatile.Register8
+ 
+ func rtc_sleep(ticks uint32) {
+-	nrf.RTC1.INTENSET.Set(nrf.RTC_INTENSET_COMPARE0)
++	// Clear the wakeup flag and a stale COMPARE0 event before the interrupt
++	// is enabled, not after: with an event pending, enabling the interrupt
++	// runs the handler at once, which sets rtc_wakeup and disables the
++	// interrupt, and clearing rtc_wakeup after that loses the wakeup. The
++	// loop below then waits forever, with the scheduler and every goroutine
++	// stopped.
+ 	rtc_wakeup.Set(0)
++	nrf.RTC1.EVENTS_COMPARE[0].Set(0)
+ 	if ticks == 1 {
+ 		// Race condition (even in hardware) at ticks == 1.
+ 		// TODO: fix this in a better way by detecting it, like the manual
+@@ -143,12 +149,21 @@
+ 	}
+ 	target := (nrf.RTC1.COUNTER.Get() + ticks) & 0x00ffffff
+ 	nrf.RTC1.CC[0].Set(target)
++	// A COMPARE0 event from here on stays pending and runs the handler once
++	// the interrupt is enabled.
++	nrf.RTC1.INTENSET.Set(nrf.RTC_INTENSET_COMPARE0)
+ 	// An interrupt here can leave CC at or behind COUNTER, and COMPARE then waits for the 24 bit wrap.
+ 	// CC within one tick of COUNTER may also miss, see https://docs.nordicsemi.com/bundle/ps_nrf52840/page/rtc.html
+ 	if remaining := (target - nrf.RTC1.COUNTER.Get()) & 0x00ffffff; remaining < 2 || remaining > ticks {
+ 		return
+ 	}
+ 	for rtc_wakeup.Get() == 0 {
++		// Should COMPARE0 be missed anyway, stop once COUNTER is past the
++		// target; the RTC overflow interrupt wakes the CPU at least every
++		// 512 s.
++		if (nrf.RTC1.COUNTER.Get()-target)&0x00ffffff < 0x800000 {
++			return
++		}
+ 		waitForEvents()
+ 	}
+ }

@@ -194,11 +194,18 @@ flash. A commit rebuilds the DFU package even when no source changed.
 **Patched TinyGo.** The firmware builds with the system TinyGo install.
 When `patches/` holds patches for its version
 (`patches/tinygo-<version>-*.patch`), the Makefile instead copies the install
-to `tinygo/root-<version>` once, applies them there and exports `TINYGOROOT`;
-the copy is rebuilt whenever a patch changes. TinyGo 0.43.0 needs no patches:
-it includes the nRF52840 USB device driver fixes (tinygo-org/tinygo#5794)
-that 0.42.0 needed patches for, which kept the console from locking up while
-browsing the history or pasting text.
+to `tinygo/root-<version>` once, applies them there, exports `TINYGOROOT` and
+builds with the tinygo binary of the copy (`libexec/tinygo` for Homebrew,
+whose `bin/tinygo` is a script that sets `TINYGOROOT` to its own install); the
+copy is rebuilt whenever a patch changes. TinyGo 0.43.0 needs one patch:
+
+- `tinygo-0.43.0-nrf-rtc-sleep-lost-wakeup.patch`: the runtime's `rtc_sleep`
+  enabled the RTC compare interrupt before it cleared its wakeup flag. With a
+  compare event still pending from an earlier short sleep, the handler ran in
+  between, set the flag and disabled the interrupt; `rtc_sleep` then cleared
+  the flag and waited for good. The scheduler stopped, and with it every
+  goroutine, while interrupts kept running: the board froze after 2h26m36s of
+  uptime (2^43 ns), every time.
 
 **Regenerated files.** `go generate ./internal/vl53l7cx`, run in `src/`,
 regenerates two kinds of files:

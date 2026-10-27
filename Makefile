@@ -1,8 +1,8 @@
 # Builds the nrf firmware with the system TinyGo install, or, when there are
 # local patches for its version in patches/, with a patched copy of it: the
 # install is then copied once into tinygo/root-<version> and patched there,
-# and the copy is rebuilt whenever a patch changes. TinyGo 0.43.0 needs no
-# patches.
+# and the copy is rebuilt whenever a patch changes. TinyGo 0.43.0 needs the
+# fix of a lost wakeup in the nRF runtime's rtc_sleep, see the README.
 
 TINYGO_VERSION := 0.43.0
 # The root of the system install, asked of tinygo only when it is copied.
@@ -13,8 +13,15 @@ ifneq ($(PATCHES),)
 TINYGOROOT := $(CURDIR)/tinygo/root-$(TINYGO_VERSION)
 STAMP      := $(TINYGOROOT)/.knixx-patched
 export TINYGOROOT
+# The tinygo binary that takes its root from TINYGOROOT: in the copy,
+# libexec/tinygo for Homebrew, whose bin/tinygo is a script that sets
+# TINYGOROOT to its own install, else bin/tinygo, as in the release
+# tarball and .deb; else the system tinygo, for a package that keeps the
+# binary outside its root. Expanded when used, after the copy exists.
+TINYGO = $(firstword $(wildcard $(TINYGOROOT)/libexec/tinygo $(TINYGOROOT)/bin/tinygo) tinygo)
 else
 STAMP :=
+TINYGO := tinygo
 unexport TINYGOROOT
 endif
 
@@ -47,7 +54,7 @@ STACK_SIZE := 8KB
 
 nrf: $(STAMP) | tinygo-version
 	@mkdir -p build
-	cd src && tinygo build -target=$(TARGET) -stack-size=$(STACK_SIZE) $(LDFLAGS) -size short -o ../$(FIRMWARE) ./nrf
+	cd src && $(TINYGO) build -target=$(TARGET) -stack-size=$(STACK_SIZE) $(LDFLAGS) -size short -o ../$(FIRMWARE) ./nrf
 
 # flash builds the firmware and flashes it over USB with bolt uf2, which
 # resets the board into its UF2 bootloader, copies the file to its drive and
@@ -61,7 +68,7 @@ dfu: $(DFU)
 
 $(HEX): $(STAMP) $(FW_SRC) $(GIT_REFS) | tinygo-version
 	@mkdir -p build
-	cd src && tinygo build -target=$(TARGET) -stack-size=$(STACK_SIZE) $(LDFLAGS) -o ../$(HEX) ./nrf
+	cd src && $(TINYGO) build -target=$(TARGET) -stack-size=$(STACK_SIZE) $(LDFLAGS) -o ../$(HEX) ./nrf
 
 # bolt is order-only: it is rebuilt, but the package only when the hex
 # changed.
@@ -124,7 +131,7 @@ allocs-update: $(ALLOCS_ELF)
 
 $(ALLOCS_ELF): $(STAMP) $(FW_SRC) | tinygo-version
 	@mkdir -p build
-	@cd src && tinygo build -target=$(TARGET) -stack-size=$(STACK_SIZE) -o ../$@ ./nrf
+	@cd src && $(TINYGO) build -target=$(TARGET) -stack-size=$(STACK_SIZE) -o ../$@ ./nrf
 
 # tinygo-root makes the patched copy, if there are patches.
 tinygo-root: $(STAMP) | tinygo-version
@@ -140,6 +147,7 @@ tinygo-version:
 ifneq ($(PATCHES),)
 $(STAMP): $(PATCHES) | tinygo-version
 	rm -rf $(TINYGOROOT)
+	@mkdir -p $(dir $(TINYGOROOT))
 	cp -a $(TINYGO_SYSTEM) $(TINYGOROOT)
 	set -e; for p in $(PATCHES); do \
 	  echo "applying $$p"; patch -p1 --forward -d $(TINYGOROOT) < $$p; \
