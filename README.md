@@ -1,5 +1,11 @@
 # knixx thunder
 
+> [!WARNING]
+> **Deprecated.** This TinyGo firmware is no longer developed. It is
+> replaced by [knixx-rs](https://github.com/flukso/knixx-rs), its port to
+> Rust: a drop-in replacement for the knixx Thunder board, with scripts in
+> Rhai and the `bolt` host tool. New releases and fixes happen there.
+
 **Flip a switch, sense the room, speak KNX.**
 
 knixx thunder is a KNX TP1 bus device built on an
